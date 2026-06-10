@@ -11,7 +11,7 @@ import {
   type LatLng,
 } from "./geometry";
 import { TECHUM_CORNER_M } from "./shiurim";
-import { computeMuvlaBumps, type MuvlaBump } from "./muvla";
+import { computeMuvlaBumps, rectContainedIn, type MuvlaBump } from "./muvla";
 
 /**
  * Eiruv techumin planner (SA HaRav 408 where extant; Ketzos HaShulchan
@@ -44,6 +44,18 @@ export interface EruvPlacement {
   newTechum: Bounds;
   /** Muvla extensions of the new techum (e.g., the home city counting as 4 amos). */
   newBumps: MuvlaBump[];
+  /**
+   * The home town kept accessible by the Rashi/Rama leniency (408:1)
+   * even though it is not fully within the eiruv's techum: since one
+   * physically spends the onset of Shabbos in his town, the whole town
+   * counts as 4 amos for him. The Mechaber — and seemingly the Alter
+   * Rebbe's Siddur — are stricter; the Alter Rebbe's Shulchan Aruch
+   * opens with the Rama's view but the rest was never published.
+   * Common practice follows the Rama (Dayan L.Y. Raskin, in the
+   * article's comments). Whether the measure also continues beyond the
+   * town is NOT credited here (a stringency).
+   */
+  ramaCity: Bounds | null;
   /** Area gained relative to the home techum (rect parts). */
   gained: Bounds[];
   /** Area lost relative to the home techum (rect parts). */
@@ -172,6 +184,26 @@ export function diamondRing(
   return ring;
 }
 
+/**
+ * Whether a point lies within a rotated square ("diamond") of
+ * corner-distance `radiusM` whose corners sit at `cornerBearingDeg`
+ * (+ multiples of 90°) from the center.
+ */
+export function diamondContains(
+  center: LatLng,
+  radiusM: number,
+  cornerBearingDeg: number,
+  p: LatLng
+): boolean {
+  const { perDegLat, perDegLng } = metersPerDegree(center.lat);
+  const dx = (p.lng - center.lng) * perDegLng;
+  const dy = (p.lat - center.lat) * perDegLat;
+  const a = (cornerBearingDeg * Math.PI) / 180;
+  const u = dx * Math.sin(a) + dy * Math.cos(a);
+  const v = dx * Math.cos(a) - dy * Math.sin(a);
+  return Math.abs(u) + Math.abs(v) <= radiusM + 0.5;
+}
+
 export function placeEruv(
   eruvSpot: LatLng,
   destination: LatLng,
@@ -179,20 +211,36 @@ export function placeEruv(
   feasibleRegion: Bounds | null,
   /** All known cities (incl. the home city) for the muvla din. */
   cities: Bounds[],
-  techumMeters?: number
+  techumMeters?: number,
+  opts?: {
+    /**
+     * The home town, to apply the Rashi/Rama 408:1 leniency: it stays
+     * accessible (as 4 amos) even when not fully within the eiruv's
+     * techum. Pass null/omit to follow the stricter view.
+     */
+    ramaHomeCity?: Bounds | null;
+  }
 ): EruvPlacement {
   const newTechum = techumMeters
     ? expandBounds(pointBounds(eruvSpot), techumMeters)
     : techumFromPoint(eruvSpot);
   const newBumps = computeMuvlaBumps(pointBounds(eruvSpot), newTechum, cities, techumMeters);
+
+  // Rashi/Rama 408:1: relevant only when the home town is not already
+  // fully swallowed (in which case the regular muvla din covers it).
+  const home = opts?.ramaHomeCity ?? null;
+  const ramaCity = home && !rectContainedIn(home, newTechum) ? home : null;
+
   return {
     newTechum,
     newBumps,
+    ramaCity,
     gained: rectDifference(newTechum, homeTechum),
     lost: rectDifference(homeTechum, newTechum),
     inFeasibleRegion: feasibleRegion !== null && boundsContain(feasibleRegion, eruvSpot),
     destinationCovered:
       boundsContain(newTechum, destination) ||
-      newBumps.some((b) => boundsContain(b.bounds, destination)),
+      newBumps.some((b) => boundsContain(b.bounds, destination)) ||
+      (ramaCity !== null && boundsContain(ramaCity, destination)),
   };
 }

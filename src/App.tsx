@@ -7,6 +7,7 @@ import type { CityDetection } from "./city/cluster";
 import { detectCityExpanding, type ExpandProgress } from "./city/expand";
 import {
   bearingDeg,
+  diamondContains,
   diamondRing,
   distanceToRectM,
   placeEruv,
@@ -88,6 +89,9 @@ export default function App() {
   const [destination, setDestination] = useState<SelectedPlace | null>(null);
   const [eruvSpot, setEruvSpot] = useState<LatLng | null>(null);
   const [rotationOn, setRotationOn] = useState(false);
+  const [rotationOffset, setRotationOffset] = useState(0);
+  // Rashi/Rama 408:1 — common practice; see the placement note.
+  const [ramaOn, setRamaOn] = useState(true);
 
   useEffect(() => {
     if (!apiKey) return;
@@ -146,6 +150,7 @@ export default function App() {
   // A new home/destination invalidates the chosen eiruv spot.
   useEffect(() => {
     setEruvSpot(null);
+    setRotationOffset(0);
   }, [place, destination, mode]);
 
   const detection =
@@ -193,30 +198,41 @@ export default function App() {
       usingCity && cityBounds ? [cityBounds, ...otherCities] : otherCities;
     const placement =
       plan && !plan.destinationInHomeTechum && destination && eruvSpot
-        ? placeEruv(eruvSpot, destination.location, techum, plan.feasibleRegion, allCities)
+        ? placeEruv(
+            eruvSpot,
+            destination.location,
+            techum,
+            plan.feasibleRegion,
+            allCities,
+            undefined,
+            { ramaHomeCity: ramaOn && usingCity ? cityBounds : null }
+          )
         : null;
 
     // Corner-rotation kula (chabad.org #4494176): the squaring may be
     // plotted to one's preference, so a corner can be aimed at the
     // destination — reach extends to 2,000·√2 amos for both placing
     // the eiruv beyond the city line and the new techum around it.
+    const cornerBearing = eruvSpot && destination
+      ? bearingDeg(eruvSpot, destination.location) + rotationOffset
+      : 0;
     const rotated =
       rotationOn && plan && !plan.destinationInHomeTechum && destination
         ? {
             placeRing: roundedRectRing(base, TECHUM_CORNER_M),
             destCircle: { center: destination.location, radiusM: TECHUM_CORNER_M },
             diamond:
-              eruvSpot &&
-              diamondRing(
-                eruvSpot,
-                TECHUM_CORNER_M,
-                bearingDeg(eruvSpot, destination.location)
-              ),
+              eruvSpot && diamondRing(eruvSpot, TECHUM_CORNER_M, cornerBearing),
             inFeasible: eruvSpot
               ? rotatedFeasible(eruvSpot, base, destination.location)
               : false,
             destCovered: eruvSpot
-              ? distanceMeters(eruvSpot, destination.location) <= TECHUM_CORNER_M
+              ? diamondContains(
+                  eruvSpot,
+                  TECHUM_CORNER_M,
+                  cornerBearing,
+                  destination.location
+                )
               : false,
             reachable:
               distanceToRectM(destination.location, base) <= 2 * TECHUM_CORNER_M,
@@ -238,7 +254,7 @@ export default function App() {
     }
 
     return { techum, altTechum, bumps, partialCities, plan, placement, rotated, fit };
-  }, [place, usingCity, cityBounds, karpefOn, detection, eruvOn, destination, eruvSpot, rotationOn]);
+  }, [place, usingCity, cityBounds, karpefOn, detection, eruvOn, destination, eruvSpot, rotationOn, rotationOffset, ramaOn]);
 
   if (!apiKey || authFailed) {
     return (
@@ -374,6 +390,17 @@ export default function App() {
                     (blue extensions; SA HaRav 408:1).
                   </p>
                 )}
+                {usingCity && detection?.bowGapM != null && (
+                  <p className="warning">
+                    ⚠ Bow-shaped city: the squared boundary spans open
+                    stretches of ≈{Math.round(detection.bowGapM).toLocaleString()}{" "}
+                    m between built areas. Open land may be "filled in" by
+                    squaring only when the built ends flanking it are within
+                    4,000 amos = 1,920 m (Nesivos Shabbos 42:17) — parts of
+                    this square may not be walkable. Review with a rav and
+                    consider adjusting the boundary manually.
+                  </p>
+                )}
                 {usingCity && partialCities.length > 0 && (
                   <p className="warning">
                     ⚠ The techum line ends <b>inside</b>{" "}
@@ -435,13 +462,17 @@ export default function App() {
                 <tr>
                   <td>Each direction</td>
                   <td>
-                    {TECHUM_AMOS.toLocaleString()} amos = {TECHUM_M} m
+                    {TECHUM_AMOS.toLocaleString()} amos = {TECHUM_M} m /{" "}
+                    {(TECHUM_M / 0.3048).toFixed(0)} ft
                     {usingCity && karpefOn ? ` (+ ${KARPEF_M.toFixed(1)} m karpef)` : ""}
                   </td>
                 </tr>
                 <tr>
                   <td>To the corner</td>
-                  <td>≈ {Math.round(TECHUM_CORNER_M)} m (2,000·√2 amos)</td>
+                  <td>
+                    ≈ {Math.round(TECHUM_CORNER_M)} m /{" "}
+                    {(TECHUM_CORNER_M / 0.3048).toFixed(0)} ft (2,000·√2 amos)
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -502,11 +533,30 @@ export default function App() {
                           checked={rotationOn}
                           onChange={(e) => setRotationOn(e.target.checked)}
                         />
-                        Corner kula: plot the squaring to your preference,
-                        aiming a corner ("diamond") at the destination — reach
-                        extends to 2,000·√2 amos ≈ {Math.round(TECHUM_CORNER_M)}{" "}
-                        m per direction (chabad.org #4494176). A kula — confirm
-                        with your rav.
+                        Corner kula: a town's squaring must align with the
+                        directions of the world, but your <i>personal</i>{" "}
+                        eiruv square may be plotted to your preference (Dayan
+                        L.Y. Raskin, chabad.org #4494176). Aiming a corner
+                        ("diamond") at the destination extends reach to
+                        2,000·√2 amos ≈ {Math.round(TECHUM_CORNER_M)} m.
+                        Confirm with your rav.
+                      </label>
+                    )}
+
+                    {plan && !plan.destinationInHomeTechum && usingCity && (
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={ramaOn}
+                          onChange={(e) => setRamaOn(e.target.checked)}
+                        />
+                        Home town as 4 amos (Rashi/Rama 408:1): your town —
+                        where you physically spend the onset of Shabbos —
+                        stays accessible even if not fully within the eiruv's
+                        techum. Common practice follows the Rama; the
+                        Mechaber, and seemingly the Alter Rebbe's Siddur, are
+                        stricter (the Alter Rebbe's Shulchan Aruch on this
+                        was never published past its opening).
                       </label>
                     )}
 
@@ -544,6 +594,24 @@ export default function App() {
                             </>
                           )}
                         </p>
+                        {rotationOn && eruvSpot && (
+                          <label className="field">
+                            <span className="field-label">
+                              Diamond rotation: {rotationOffset}° — re-aiming
+                              the corner trades reach toward the destination
+                              for sideways coverage (e.g., to keep your
+                              walking route inside the square; article
+                              par. 14)
+                            </span>
+                            <input
+                              type="range"
+                              min={-45}
+                              max={45}
+                              value={rotationOffset}
+                              onChange={(e) => setRotationOffset(Number(e.target.value))}
+                            />
+                          </label>
+                        )}
                         {eruvSpot && (
                           <>
                             {!spotOk && (
@@ -573,6 +641,16 @@ export default function App() {
                                 (e.g., your own city) counts as only 4 amos —
                                 the purple techum extends beyond it
                                 (SA HaRav 408:1).
+                              </p>
+                            )}
+                            {!rotationOn && placement?.ramaCity && (
+                              <p className="muted">
+                                Your home town is not fully within the
+                                eiruv's techum, but per the Rashi/Rama
+                                leniency (408:1) it stays accessible as 4
+                                amos (purple outline). Whether one may also
+                                continue <i>beyond</i> the town is not
+                                credited here (a stringency).
                               </p>
                             )}
                             <p className="muted">
@@ -615,9 +693,12 @@ export default function App() {
           <p className="disclaimer">
             This tool is an aid for learning and planning only. Building data
             (OpenStreetMap) may be incomplete, and several dinim — which
-            structures join the city, rivers and highways, karpef, hilly
-            terrain, the eiruv's resting place — depend on local conditions.
-            Consult a rav before relying on any boundary or eiruv shown here.
+            structures join the city, karpef, hilly terrain, the eiruv's
+            resting place — depend on local conditions. Measurements here
+            rely on map/satellite data; halachic land measurement is a much
+            more hands-on process and may well produce different results
+            (Dayan Raskin). Consult a rav before relying on any boundary or
+            eiruv shown here.
           </p>
           <button
             className="link-button"
@@ -653,7 +734,14 @@ export default function App() {
             onEruvSpotChange={setEruvSpot}
             newTechumBounds={!rotated ? placement?.newTechum ?? null : null}
             newTechumRing={placingEruv && rotated ? rotated.diamond || null : null}
-            newTechumBumps={!rotated ? placement?.newBumps.map((b) => b.bounds) ?? [] : []}
+            newTechumBumps={
+              !rotated
+                ? [
+                    ...(placement?.newBumps.map((b) => b.bounds) ?? []),
+                    ...(placement?.ramaCity ? [placement.ramaCity] : []),
+                  ]
+                : []
+            }
             gained={!rotated ? placement?.gained ?? [] : []}
             lost={!rotated ? placement?.lost ?? [] : []}
             fitBounds={view?.fit ?? null}

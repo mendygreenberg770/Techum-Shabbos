@@ -131,6 +131,29 @@ describe("detectCity: other cities (for the ir muvla'as din)", () => {
   });
 });
 
+describe("detectCity: bow-shaped city (Nesivos Shabbos 42:17)", () => {
+  it("flags a C-shaped city whose interior gap exceeds 4,000 amos", () => {
+    // Two east-west arms 2,400 m apart, connected by a column on the west.
+    const buildings: LatLng[][] = [];
+    for (let x = 0; x <= 2400; x += 40) {
+      buildings.push(rect(x, 0));
+      buildings.push(rect(x, 2400));
+    }
+    for (let y = 40; y < 2400; y += 40) {
+      buildings.push(rect(0, y));
+    }
+    const det = detectCity(C, buildings, area(4000))!;
+    expect(det.clusterSize).toBe(buildings.length); // all joined (30 m gaps)
+    expect(det.bowGapM).not.toBeNull();
+    expect(det.bowGapM!).toBeGreaterThan(1920);
+  });
+
+  it("does not flag a compact town", () => {
+    const det = detectCity(C, [rect(0, 0), rect(40, 0), rect(80, 0)], area(2000))!;
+    expect(det.bowGapM).toBeNull();
+  });
+});
+
 describe("detectCity: truncation at the edge of the analyzed area", () => {
   it("flags sides where the cluster reaches the analyzed area's edge", () => {
     const det = detectCity(C, [rect(0, 0), rect(40, 0), rect(80, 0)], area(150))!;

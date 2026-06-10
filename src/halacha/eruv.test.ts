@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bearingDeg,
+  diamondContains,
   diamondRing,
   distanceToRectM,
   placeEruv,
@@ -97,6 +98,38 @@ describe("placeEruv", () => {
   });
 });
 
+describe("Rashi/Rama 408:1 — home town as 4 amos", () => {
+  // A wide home town spanning x -3000..50; eiruv placed 850 m beyond
+  // its east edge (a valid distance), so the town is NOT fully within
+  // the eiruv's techum (which spans x -60..1860).
+  const homeTown = rectM(-3000, -50, 50, 50);
+  const eruv = at(900, 0);
+  const dest = at(-2500, 0); // deep inside the home town
+
+  it("keeps the home town accessible under the Rama", () => {
+    const placement = placeEruv(eruv, dest, homeTechum, null, [], undefined, {
+      ramaHomeCity: homeTown,
+    });
+    expect(placement.ramaCity).not.toBeNull();
+    expect(placement.destinationCovered).toBe(true);
+  });
+
+  it("loses the far side of the town under the stricter view", () => {
+    const placement = placeEruv(eruv, dest, homeTechum, null, []);
+    expect(placement.ramaCity).toBeNull();
+    expect(placement.destinationCovered).toBe(false);
+  });
+
+  it("defers to the regular muvla din when the town is fully swallowed", () => {
+    const smallTown = rectM(-50, -50, 50, 50);
+    const placement = placeEruv(at(500, 0), at(0, 0), homeTechum, null, [smallTown], undefined, {
+      ramaHomeCity: smallTown,
+    });
+    expect(placement.ramaCity).toBeNull(); // contained → ordinary muvla
+    expect(placement.destinationCovered).toBe(true);
+  });
+});
+
 describe("corner-rotation kula (chabad.org #4494176)", () => {
   // Home city: 100 m square around C.
   const homeBase = rectM(-50, -50, 50, 50);
@@ -126,6 +159,18 @@ describe("corner-rotation kula (chabad.org #4494176)", () => {
     // First corner points due east at the corner distance.
     expect((ring[0].lng - eruv.lng) * perDegLng).toBeCloseTo(TECHUM_CORNER_M, 0);
     expect((ring[0].lat - eruv.lat) * perDegLat).toBeCloseTo(0, 0);
+  });
+
+  it("checks containment in a rotated diamond, with offset trade-off", () => {
+    const eruv = at(0, 0);
+    const dest = at(1300, 0); // due east, within corner reach
+    const aimed = bearingDeg(eruv, dest);
+    expect(diamondContains(eruv, TECHUM_CORNER_M, aimed, dest)).toBe(true);
+    // Re-aiming the corner 45° away (edge toward the destination)
+    // shrinks reach there to 960 m — the destination falls out.
+    expect(diamondContains(eruv, TECHUM_CORNER_M, aimed + 45, dest)).toBe(false);
+    // ... while a point 900 m north-east-ish comes into range instead.
+    expect(diamondContains(eruv, TECHUM_CORNER_M, aimed + 45, at(900, 900))).toBe(true);
   });
 
   it("builds a rounded-rect placement region around the city", () => {

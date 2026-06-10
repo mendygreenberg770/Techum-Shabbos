@@ -52,6 +52,15 @@ export interface CityDetection {
    * to matter for the ir muvla'as din — i.e. within reach of the techum.
    */
   otherCities: Bounds[];
+  /**
+   * Bow-shaped city flag (Nesivos Shabbos 42:17, via the article's
+   * comments): open area inside the squared city may be "filled in"
+   * only when the built ends flanking it are within 4,000 amos
+   * (1,920 m). When an interior open stretch along a cardinal line
+   * exceeds that, this holds its size in meters (a heuristic — review
+   * with a rav); null when the squared city has no such stretch.
+   */
+  bowGapM: number | null;
 }
 
 interface Vertex {
@@ -416,5 +425,37 @@ export function detectCity(
     nearestBuildingM: nearestDist,
     truncatedSides: [...truncated],
     otherCities,
+    bowGapM: bowGap(clusterVerts),
   };
+}
+
+/**
+ * Largest interior open stretch along a cardinal line of the cluster's
+ * occupancy grid, when it exceeds 4,000 amos — the bow-city limit on
+ * squaring (Nesivos Shabbos 42:17). Null otherwise.
+ */
+function bowGap(clusterVerts: Vertex[]): number | null {
+  const CELL = 200;
+  const LIMIT = 2 * TECHUM_M; // 4,000 amos = 1,920 m
+  const occupied = new Map<number, Set<number>>(); // row (cy) -> set of cx
+  const occupiedT = new Map<number, Set<number>>(); // col (cx) -> set of cy
+  for (const v of clusterVerts) {
+    const cx = Math.floor(v.x / CELL);
+    const cy = Math.floor(v.y / CELL);
+    if (!occupied.has(cy)) occupied.set(cy, new Set());
+    occupied.get(cy)!.add(cx);
+    if (!occupiedT.has(cx)) occupiedT.set(cx, new Set());
+    occupiedT.get(cx)!.add(cy);
+  }
+  let maxGapM = 0;
+  for (const lines of [occupied, occupiedT]) {
+    for (const cellsInLine of lines.values()) {
+      const sorted = [...cellsInLine].sort((a, b) => a - b);
+      for (let i = 1; i < sorted.length; i++) {
+        const gapM = (sorted[i] - sorted[i - 1] - 1) * CELL;
+        if (gapM > maxGapM) maxGapM = gapM;
+      }
+    }
+  }
+  return maxGapM > LIMIT ? maxGapM : null;
 }
