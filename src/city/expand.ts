@@ -29,6 +29,9 @@ export interface ExpandResult {
   fetchedRect: Bounds;
   /** True when a limit stopped the expansion before the city closed. */
   capped: boolean;
+  /** Set when building data stopped loading mid-expansion: the result
+   * is based on what was fetched so far and may be incomplete. */
+  fetchError?: string;
 }
 
 const INITIAL_HALF_M = 1200;
@@ -39,18 +42,20 @@ export async function detectCityExpanding(
   center: LatLng,
   limits: ExpandLimits,
   onProgress?: (p: ExpandProgress) => void,
-  isCancelled?: () => boolean
+  isCancelled?: () => boolean,
+  signal?: AbortSignal
 ): Promise<ExpandResult> {
   const { perDegLat, perDegLng } = metersPerDegree(center.lat);
   let rect = expandBounds(pointBounds(center), INITIAL_HALF_M);
   const byId = new Map<number, LatLng[]>();
 
   const fetchInto = async (r: Bounds) => {
-    for (const b of await fetchBuildingsInRect(r)) {
+    for (const b of await fetchBuildingsInRect(r, signal)) {
       byId.set(b.id, b.ring);
     }
   };
 
+  // The very first fetch failing means no data at all — let it throw.
   await fetchInto(rect);
   let detection: CityDetection | null = null;
   for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
@@ -91,9 +96,23 @@ export async function detectCityExpanding(
     if (rect.west < old.west) {
       strips.push({ north: old.north, south: old.south, east: old.west, west: rect.west });
     }
-    for (const s of strips) {
-      if (isCancelled?.()) break;
-      await fetchInto(s);
+    try {
+      for (const s of strips) {
+        if (isCancelled?.()) break;
+        await fetchInto(s);
+      }
+    } catch (e) {
+      if (isCancelled?.() || signal?.aborted) {
+        return { detection, fetchedRect: old, capped: true };
+      }
+      // Mid-expansion failure: keep the city detected so far (with its
+      // truncation warnings) rather than discarding everything.
+      return {
+        detection,
+        fetchedRect: old,
+        capped: true,
+        fetchError: e instanceof Error ? e.message : String(e),
+      };
     }
   }
   return { detection, fetchedRect: rect, capped: true };

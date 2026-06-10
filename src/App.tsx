@@ -67,6 +67,8 @@ interface CityState {
   detection?: CityDetection;
   capped?: boolean;
   error?: string;
+  /** Building data stopped loading partway — result may be incomplete. */
+  fetchError?: string;
 }
 
 const fmtAmos = (m: number) => Math.round(m / AMAH_M).toLocaleString();
@@ -166,6 +168,10 @@ export default function App() {
       return;
     }
     let cancelled = false;
+    // Aborting stale requests matters beyond cleanliness: abandoned
+    // Overpass queries keep occupying the server's per-IP slots and
+    // get subsequent requests rate-limited.
+    const controller = new AbortController();
     setCityState({ status: "loading" });
     detectCityExpanding(
       place.location,
@@ -173,7 +179,8 @@ export default function App() {
       (p) => {
         if (!cancelled) setProgress(p);
       },
-      () => cancelled
+      () => cancelled,
+      controller.signal
     )
       .then((result) => {
         if (cancelled) return;
@@ -181,6 +188,7 @@ export default function App() {
           status: "done",
           detection: result.detection ?? undefined,
           capped: result.capped,
+          fetchError: result.fetchError,
         });
         setProgress(null);
       })
@@ -195,6 +203,7 @@ export default function App() {
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [place, mode, limitKey, retryNonce]);
 
@@ -433,7 +442,23 @@ export default function App() {
                 )}
                 {cityState.status === "error" && (
                   <p className="error">
-                    Building data failed to load ({cityState.error}).{" "}
+                    ✗ Building data failed to load ({cityState.error}), so
+                    the city boundary could <b>not</b> be calculated — the
+                    techum shown is only the point-based one (a stringency;
+                    the real techum from the city edge extends further).{" "}
+                    <button
+                      className="link-button"
+                      onClick={() => setRetryNonce((n) => n + 1)}
+                    >
+                      Retry
+                    </button>
+                  </p>
+                )}
+                {cityState.status === "done" && cityState.fetchError && (
+                  <p className="warning">
+                    ⚠ Building data stopped loading partway (
+                    {cityState.fetchError}) — the city boundary is based on
+                    what was fetched and may be incomplete.{" "}
                     <button
                       className="link-button"
                       onClick={() => setRetryNonce((n) => n + 1)}
@@ -443,9 +468,16 @@ export default function App() {
                   </p>
                 )}
                 {noCityFound && cityState.status === "done" && (
-                  <p className="muted">
-                    No buildings found near this address — showing the
-                    point-based techum of a lone dwelling instead.
+                  <p className="warning">
+                    ⚠ No buildings were found near this address in
+                    OpenStreetMap — showing the point-based techum of a
+                    lone dwelling instead.{" "}
+                    <button
+                      className="link-button"
+                      onClick={() => setRetryNonce((n) => n + 1)}
+                    >
+                      Retry
+                    </button>
                   </p>
                 )}
                 {detection && (
