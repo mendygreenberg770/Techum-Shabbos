@@ -218,7 +218,48 @@ the reader comments and the author's replies:
     route. *(In the planner's checklist: the app cannot replace the local
     rav.)*
 
-## 7. Open halachic questions (to confirm with a rav before they're encoded)
+## 7. Supplementary dinim (sources beyond Shulchan Aruch HaRav)
+
+The Alter Rebbe's Shulchan Aruch is extant through siman 408; the
+following were added from the Mechaber/Rama and accepted poskim, per the
+project's fallback policy:
+
+**In the eiruv planner logic:**
+- **Eiruv inside a town (SA HaRav 408 — extant)**: an eiruv resting
+  within a town (or its 70⅔-amah ibur margin) makes the placer as one of
+  its residents — the whole town is his 4 amos and the techum extends
+  2,000 amos from its squared edge. Implemented: the planner detects a
+  host town and extends the new techum from the whole town. Within one's
+  *own* town the eiruv is a no-op — the planner warns.
+- **Rashi/Rama 408:1** home-town leniency — toggle, default ON (common
+  practice), as discussed in §6.
+
+**In the eiruv checklist (Mechaber/Rama, 409–416; Ketzos HaShulchan):**
+- Eiruv in a **cemetery** is invalid — benefit from it is forbidden
+  (SA 409:1); the spot must be defined and accessible bein hashmashos.
+- **Food shiur**: bread for two meals, commonly reckoned at the volume of
+  six to eight beitzim (≈ 346–461 cm³ at Reb Chaim Naeh's beitzah of
+  57.6 cm³).
+- **Traveler's declaration** ("shevisasi b'makom ploni") — acquiring
+  shevisa at a named spot within 2,000 amos reachable before nightfall
+  (SA 409).
+- **Conditional eiruvin** in two directions, stipulating which takes
+  effect (SA 413).
+- **Two-day Yom Tov**: the eiruv must exist at the onset of each day
+  (SA 416).
+- Eiruv only **for a mitzvah or similar need** (SA 415:1).
+
+**Reference panel ("If one went beyond the techum") — all extant in
+Shulchan Aruch HaRav:**
+- Beyond the techum: 4 amos only (SA HaRav 405); went/taken out b'ones
+  and returned — as if never left; taken into a walled town — the town is
+  his 4 amos (405).
+- Authorized leavers (rescue, midwife): 2,000 from where they are; "all
+  who go out to rescue return to their place" (407).
+- Human dignity allowance (406); belongings/animals follow the owner's
+  techum (397); above 10 tefachim (boat) is a safek (404).
+
+## 8. Open halachic questions (to confirm with a rav before they're encoded)
 
 1. **Karpef for a single city** — machlokes in 398:5; what does SA HaRav 398
    rule, and should the default line include it? (App will support showing

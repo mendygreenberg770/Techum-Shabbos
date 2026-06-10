@@ -3,6 +3,7 @@ import KeySetup from "./components/KeySetup";
 import MapView from "./components/MapView";
 import SearchBox from "./components/SearchBox";
 import EruvChecklist from "./components/EruvChecklist";
+import BeyondTechumNotes from "./components/BeyondTechumNotes";
 import type { CityDetection } from "./city/cluster";
 import { detectCityExpanding, type ExpandProgress } from "./city/expand";
 import {
@@ -643,6 +644,25 @@ export default function App() {
                                 (SA HaRav 408:1).
                               </p>
                             )}
+                            {!rotationOn &&
+                              placement?.hostCity &&
+                              (placement.hostCity === cityBounds ? (
+                                <p className="warning">
+                                  ⚠ The eiruv rests inside your own town (or
+                                  its 70⅔-amah margin) — there it has{" "}
+                                  <b>no effect</b>; you simply keep your
+                                  regular techum. Move it outside the green
+                                  rectangle.
+                                </p>
+                              ) : (
+                                <p className="muted">
+                                  The eiruv rests inside a town: you are
+                                  reckoned as one of its residents — the
+                                  whole town is your 4 amos and the new
+                                  techum extends 2,000 amos from its squared
+                                  edge (SA HaRav 408).
+                                </p>
+                              ))}
                             {!rotationOn && placement?.ramaCity && (
                               <p className="muted">
                                 Your home town is not fully within the
@@ -686,6 +706,8 @@ export default function App() {
                 <li><span className="swatch" style={{ background: "#e01b24" }} /> Area lost</li>
               </ul>
             </details>
+
+            <BeyondTechumNotes />
           </section>
         )}
 
@@ -739,6 +761,9 @@ export default function App() {
                 ? [
                     ...(placement?.newBumps.map((b) => b.bounds) ?? []),
                     ...(placement?.ramaCity ? [placement.ramaCity] : []),
+                    ...(placement?.hostCity && placement.hostCity !== cityBounds
+                      ? [placement.hostCity]
+                      : []),
                   ]
                 : []
             }

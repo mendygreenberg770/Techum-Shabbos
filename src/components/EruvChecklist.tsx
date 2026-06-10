@@ -1,8 +1,9 @@
 /**
- * Conditions for a valid eiruv techumin, per Ketzos HaShulchan
- * (hilchos eiruvei techumin; most of SA 409-416 is not extant in
- * Shulchan Aruch HaRav). Guidance only — details (the food's shiur,
- * validity of the resting spot) should be confirmed with a rav.
+ * Conditions for a valid eiruv techumin. Most of SA 409-416 is not
+ * extant in Shulchan Aruch HaRav, so these follow the Mechaber/Rama
+ * with the Ketzos HaShulchan (and accepted poskim). Guidance only —
+ * details (the food's shiur, validity of the resting spot) should be
+ * confirmed with a rav.
  */
 export default function EruvChecklist() {
   return (
@@ -14,17 +15,43 @@ export default function EruvChecklist() {
           eat during bein hashmashos.
         </li>
         <li>
-          Food: bread sufficient for <b>two meals</b>, or an accompaniment
-          (lifsan) eaten with two meals — per the shiurim of Reb Chaim Naeh.
+          Food: bread sufficient for <b>two meals</b> — commonly reckoned at
+          the volume of six to eight beitzim (≈ 346–461 cm³ per Reb Chaim
+          Naeh's beitzah of 57.6 cm³) — or an accompaniment (lifsan) eaten
+          with two meals. Confirm the exact quantity with your rav.
+        </li>
+        <li>
+          The eiruv must rest <b>outside your town</b> (and outside its
+          70⅔-amah margin) — within your own town it has no effect — and
+          within 2,000 amos of the town, at a <b>single defined spot</b>.
         </li>
         <li>
           The spot must be one where you <b>could halachically access and eat
-          the food</b> at bein hashmashos (not locked away from you, not a
-          place forbidden to you).
+          the food</b> at bein hashmashos (not locked away from you, not
+          requiring a forbidden act to reach). An eiruv placed in a{" "}
+          <b>cemetery</b> is invalid, since benefit from it is forbidden
+          (SA 409:1).
         </li>
         <li>
           One may only place an eiruv <b>for the sake of a mitzvah or a
-          similar need</b> (e.g., a simchah, greeting one's rebbi).
+          similar need</b> (e.g., a simchah, greeting one's rebbi)
+          (SA 415:1).
+        </li>
+        <li>
+          <b>Traveler's declaration:</b> one on the road before Shabbos may
+          acquire shevisa by declaration — naming a known spot (e.g., a tree
+          or landmark) within 2,000 amos that he could reach before
+          nightfall: "shevisasi b'makom ploni" (SA 409).
+        </li>
+        <li>
+          <b>Conditional eiruvin:</b> one may deposit two eiruvin in opposite
+          directions and stipulate which takes effect (e.g., depending on
+          where the need arises) (SA 413).
+        </li>
+        <li>
+          <b>Two-day Yom Tov:</b> the eiruv must exist at the onset of{" "}
+          <i>each</i> day — place two eiruvin or ensure the food remains
+          intact for the second evening (SA 416).
         </li>
         <li>
           <b>Brachah:</b>{" "}

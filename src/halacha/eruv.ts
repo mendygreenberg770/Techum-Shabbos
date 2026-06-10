@@ -10,7 +10,7 @@ import {
   type Bounds,
   type LatLng,
 } from "./geometry";
-import { TECHUM_CORNER_M } from "./shiurim";
+import { KARPEF_M, TECHUM_CORNER_M, TECHUM_M } from "./shiurim";
 import { computeMuvlaBumps, rectContainedIn, type MuvlaBump } from "./muvla";
 
 /**
@@ -44,6 +44,15 @@ export interface EruvPlacement {
   newTechum: Bounds;
   /** Muvla extensions of the new techum (e.g., the home city counting as 4 amos). */
   newBumps: MuvlaBump[];
+  /**
+   * The town the eiruv rests in (within the town or its 70 2/3-amah
+   * ibur margin), if any. One who places his eiruv inside a town is as
+   * one of its residents: the whole town is his 4 amos and the techum
+   * extends 2,000 amos from its squared edge (SA HaRav 408). When this
+   * is the placer's own town, the eiruv has no effect at all — he
+   * simply keeps his regular techum.
+   */
+  hostCity: Bounds | null;
   /**
    * The home town kept accessible by the Rashi/Rama leniency (408:1)
    * even though it is not fully within the eiruv's techum: since one
@@ -221,26 +230,49 @@ export function placeEruv(
     ramaHomeCity?: Bounds | null;
   }
 ): EruvPlacement {
-  const newTechum = techumMeters
-    ? expandBounds(pointBounds(eruvSpot), techumMeters)
-    : techumFromPoint(eruvSpot);
-  const newBumps = computeMuvlaBumps(pointBounds(eruvSpot), newTechum, cities, techumMeters);
+  const meters = techumMeters ?? TECHUM_M;
+
+  // An eiruv resting inside a town (or its ibur margin) makes the
+  // placer as one of its residents: the techum extends from the whole
+  // squared town, not from the bare point (SA HaRav 408).
+  const hostCity =
+    cities.find((c) => boundsContain(expandBounds(c, KARPEF_M), eruvSpot)) ?? null;
+  const newBase = hostCity ?? pointBounds(eruvSpot);
+  const newTechum = expandBounds(newBase, meters);
+  const newBumps = computeMuvlaBumps(
+    newBase,
+    newTechum,
+    cities.filter((c) => c !== hostCity),
+    meters
+  );
 
   // Rashi/Rama 408:1: relevant only when the home town is not already
   // fully swallowed (in which case the regular muvla din covers it).
   const home = opts?.ramaHomeCity ?? null;
-  const ramaCity = home && !rectContainedIn(home, newTechum) ? home : null;
+  const ramaCity =
+    home && home !== hostCity && !rectContainedIn(home, newTechum) ? home : null;
+
+  const destinationCovered =
+    boundsContain(newTechum, destination) ||
+    newBumps.some((b) => boundsContain(b.bounds, destination)) ||
+    (ramaCity !== null && boundsContain(ramaCity, destination));
+
+  // The yellow region is computed for a bare-point eiruv; a spot whose
+  // host-town credit covers the destination is also valid, provided it
+  // is reachable (within the home techum).
+  const reachable = boundsContain(homeTechum, eruvSpot);
+  const inFeasibleRegion =
+    (feasibleRegion !== null && boundsContain(feasibleRegion, eruvSpot)) ||
+    (reachable && destinationCovered);
 
   return {
     newTechum,
     newBumps,
+    hostCity,
     ramaCity,
     gained: rectDifference(newTechum, homeTechum),
     lost: rectDifference(homeTechum, newTechum),
-    inFeasibleRegion: feasibleRegion !== null && boundsContain(feasibleRegion, eruvSpot),
-    destinationCovered:
-      boundsContain(newTechum, destination) ||
-      newBumps.some((b) => boundsContain(b.bounds, destination)) ||
-      (ramaCity !== null && boundsContain(ramaCity, destination)),
+    inFeasibleRegion,
+    destinationCovered,
   };
 }

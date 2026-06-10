@@ -98,6 +98,39 @@ describe("placeEruv", () => {
   });
 });
 
+describe("eiruv resting inside a town (SA HaRav 408)", () => {
+  it("credits the whole host town: techum extends from its squared edge", () => {
+    // Host town spans x 700..1500; eiruv placed inside it at x=800.
+    const hostTown = rectM(700, -50, 1500, 50);
+    const dest = at(2300, 0); // beyond a bare point's reach (1760)
+    const placement = placeEruv(at(800, 0), dest, homeTechum, null, [hostTown]);
+    expect(placement.hostCity).toBe(hostTown);
+    // New techum: town east edge 1500 + 960 = 2460 → destination covered.
+    expect(mLng(placement.newTechum.east)).toBeCloseTo(1500 + TECHUM_M, 0);
+    expect(placement.destinationCovered).toBe(true);
+    // Reachable (within the home techum) → valid despite being outside
+    // the bare-point feasible region.
+    expect(placement.inFeasibleRegion).toBe(true);
+  });
+
+  it("also credits the town's 70 2/3-amah ibur margin", () => {
+    const hostTown = rectM(700, -50, 1500, 50);
+    // 20 m east of the town's edge — within the ibur margin (33.92 m).
+    const placement = placeEruv(at(1520, 0), at(2300, 0), homeTechum, null, [hostTown]);
+    expect(placement.hostCity).toBe(hostTown);
+  });
+
+  it("an eiruv inside one's own town is a no-op (regular techum)", () => {
+    const ownTown = rectM(-50, -50, 50, 50);
+    const myTechum = expandBounds(ownTown, TECHUM_M);
+    const placement = placeEruv(at(0, 0), at(1500, 0), myTechum, null, [ownTown]);
+    expect(placement.hostCity).toBe(ownTown);
+    // The "new" techum equals the regular techum — nothing gained.
+    expect(placement.gained).toHaveLength(0);
+    expect(placement.destinationCovered).toBe(false);
+  });
+});
+
 describe("Rashi/Rama 408:1 — home town as 4 amos", () => {
   // A wide home town spanning x -3000..50; eiruv placed 850 m beyond
   // its east edge (a valid distance), so the town is NOT fully within
