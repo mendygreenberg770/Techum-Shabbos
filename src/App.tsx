@@ -48,10 +48,13 @@ import {
 } from "./state/share";
 
 const STORAGE_KEY = "techum.gmapsApiKey";
+// No key is committed to the repo. Supply it at build time
+// (VITE_GOOGLE_MAPS_API_KEY — e.g. a Vercel environment variable) or
+// paste one into the setup screen (stored in this browser only). A Maps
+// JavaScript key is necessarily visible in the served bundle; its real
+// protection is the HTTP-referrer and API restrictions in the Google
+// Cloud console, plus quota caps.
 const ENV_KEY = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined) || null;
-// Maps JavaScript API keys are designed to be embedded client-side;
-// restrict this key to your domains in the Google Cloud console.
-const DEFAULT_KEY = "AIzaSyDtOQylrdusufl4zsRVoLr9SngVGXoUzEs";
 
 /** Beyond this distance from the nearest building, treat the address
  * as a lone dwelling rather than part of the detected cluster. */
@@ -107,7 +110,7 @@ export default function App() {
   // Changing the key always goes through a page reload (the Maps script
   // can only be loaded once per page), so this never needs a setter.
   const [apiKey] = useState<string | null>(
-    () => ENV_KEY ?? localStorage.getItem(STORAGE_KEY) ?? DEFAULT_KEY
+    () => ENV_KEY ?? localStorage.getItem(STORAGE_KEY)
   );
   const [authFailed, setAuthFailed] = useState(false);
   const [mapsReady, setMapsReady] = useState(false);

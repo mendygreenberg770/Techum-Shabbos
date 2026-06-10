@@ -79,13 +79,32 @@ npm install
 npm run dev
 ```
 
-Open the printed URL. A default **Google Maps API key** is bundled (restrict
-it to your domains in the Google Cloud console!); you can override it in the
-app (stored in your browser's localStorage) or at build time:
+Open the printed URL. **No Google Maps API key is committed to this
+repo.** Provide one at build time (on Vercel: Project Settings →
+Environment Variables) or paste it into the in-app setup screen (stored
+in your browser's localStorage only):
 
 ```bash
 VITE_GOOGLE_MAPS_API_KEY=your-key npm run dev
 ```
+
+### Securing the key
+
+A Maps **JavaScript** API key cannot be hidden — the browser needs it, so
+anyone can read it from the served page. Google's intended protection is
+making the key useless anywhere else:
+
+1. **Application restriction** (Credentials → your key → Website
+   restrictions): allow only your domains, e.g.
+   `https://techum-shabbos.vercel.app/*` (and `http://localhost:5173/*`
+   on a separate dev key if you like).
+2. **API restriction**: limit the key to Maps JavaScript API, Geocoding
+   API, and Places API (New) — nothing else.
+3. **Quota / billing alerts**: set daily quota caps and a budget alert so
+   abuse can't run up a bill.
+4. If a key was ever committed or deployed **unrestricted**, treat it as
+   compromised (git history is forever): create a new restricted key and
+   delete the old one.
 
 ### Getting a Google Maps API key
 
