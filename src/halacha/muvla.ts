@@ -72,6 +72,30 @@ export function mergeCities(primary: Bounds[], extra: Bounds[]): Bounds[] {
 /** Half-meter tolerance for all geometric comparisons. */
 const EPS_M = 0.5;
 
+/**
+ * Kalsa midaso (SA HaRav 408:1): cities the techum line ends inside of —
+ * one may walk only up to the line there, with no 4-amos credit. A city
+ * is flagged when the boundary of the reachable area (the base techum or
+ * one of its muvla extensions) cuts through it, and it was NOT itself
+ * credited as muvla (a chain-credited city is reachable in full — it
+ * must not also be painted as blocked).
+ */
+export function kalsaCities(
+  techum: Bounds,
+  bumps: MuvlaBump[],
+  cities: Bounds[]
+): Bounds[] {
+  return cities.filter((c) => {
+    if (bumps.some((b) => b.city === c)) return false;
+    const cutByBase =
+      rectIntersect(c, techum) !== null && !rectContainedIn(c, techum);
+    const cutByBump = bumps.some(
+      (b) => rectIntersect(c, b.bounds) !== null && !rectContainedIn(c, b.bounds)
+    );
+    return cutByBase || cutByBump;
+  });
+}
+
 /** A city rect in directional view: `lo`..`hi` along the outward axis,
  * `pLo`..`pHi` across it (meters in a local frame). */
 interface DirRect {

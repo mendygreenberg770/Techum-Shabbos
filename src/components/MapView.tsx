@@ -29,6 +29,9 @@ interface Props {
   /** Corner-rotation kula: placement region ring + destination circle. */
   feasibleRing: LatLng[] | null;
   feasibleCircle: { center: LatLng; radiusM: number } | null;
+  /** Host-town placement areas: resting the eiruv inside one extends
+   * the new techum from the whole town's edge (yellow rectangles). */
+  hostPlaceableRects: Bounds[];
   eruvSpot: LatLng | null;
   eruvPlacingActive: boolean;
   onEruvSpotChange: (p: LatLng) => void;
@@ -87,6 +90,15 @@ const FEASIBLE_POLY_STYLE: google.maps.PolygonOptions = {
   strokeWeight: 1.5,
   fillColor: "#f5c211",
   fillOpacity: 0.1,
+  clickable: false,
+};
+
+const HOST_PLACEABLE_STYLE: google.maps.RectangleOptions = {
+  strokeColor: "#b48800",
+  strokeOpacity: 0.9,
+  strokeWeight: 1.5,
+  fillColor: "#f5c211",
+  fillOpacity: 0.18,
   clickable: false,
 };
 
@@ -166,6 +178,7 @@ export default function MapView(props: Props) {
   const swallowedPool = useRef<google.maps.Rectangle[]>([]);
   const partialPool = useRef<google.maps.Rectangle[]>([]);
   const bowGapPool = useRef<google.maps.Rectangle[]>([]);
+  const hostPlaceablePool = useRef<google.maps.Rectangle[]>([]);
   const feasibleRingRef = useRef<google.maps.Polygon | null>(null);
   const feasibleCircleRef = useRef<google.maps.Circle | null>(null);
   const diamondRef = useRef<google.maps.Polygon | null>(null);
@@ -221,6 +234,7 @@ export default function MapView(props: Props) {
     feasibleRegion,
     feasibleRing,
     feasibleCircle,
+    hostPlaceableRects,
     eruvSpot,
     newTechumBounds,
     newTechumRing,
@@ -374,6 +388,8 @@ export default function MapView(props: Props) {
     } else {
       feasibleRef.current.setMap(null);
     }
+
+    syncRects(hostPlaceablePool.current, map, hostPlaceableRects, HOST_PLACEABLE_STYLE);
 
     if (!eruvMarkerRef.current) {
       eruvMarkerRef.current = new google.maps.Marker({

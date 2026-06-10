@@ -13,18 +13,18 @@ import {
   diamondContains,
   diamondRing,
   distanceToRectM,
+  hostTownCandidates,
   placeEruv,
   planEruv,
   rotatedFeasible,
   roundedRectRing,
 } from "./halacha/eruv";
-import { computeMuvlaBumps, mergeCities, rectContainedIn } from "./halacha/muvla";
+import { computeMuvlaBumps, kalsaCities, mergeCities } from "./halacha/muvla";
 import {
   distanceMeters,
   expandBounds,
   metersPerDegree,
   pointBounds,
-  rectIntersect,
   rectUnion,
   techumFromPoint,
   type Bounds,
@@ -370,14 +370,11 @@ export default function App() {
           )
         : null;
 
-    // Kalsa midaso: neighboring cities the techum line ends inside of
-    // (overlapping but not fully swallowed) — one may walk only up to
-    // the line there; no 4-amos credit.
-    const partialCities = usingCity
-      ? otherCities.filter(
-          (c) => rectIntersect(c, techum) !== null && !rectContainedIn(c, techum)
-        )
-      : [];
+    // Kalsa midaso: neighboring cities the techum line (base square or
+    // a muvla extension) ends inside of — one may walk only up to the
+    // line there; no 4-amos credit. A chain-credited city is excluded:
+    // it is reachable in full, so it must not also be painted red.
+    const partialCities = usingCity ? kalsaCities(techum, bumps, otherCities) : [];
 
     const plan =
       eruvOn && destination ? planEruv(techum, bumps, destination.location) : null;
@@ -399,6 +396,18 @@ export default function App() {
       usingCity && cityBounds ? [cityBounds, ...otherCities] : otherCities,
       eruvCities
     );
+    // Towns that can carry the eiruv when no bare-point placement could:
+    // resting inside such a town extends the new techum from the whole
+    // town's squared edge (SA HaRav 408). The placer's own town cannot
+    // help (an eiruv there is a no-op).
+    const hostCandidates =
+      plan && !plan.destinationInHomeTechum && destination
+        ? hostTownCandidates(
+            techum,
+            allCities.filter((c) => c !== cityBounds),
+            destination.location
+          )
+        : [];
     const placement =
       plan && !plan.destinationInHomeTechum && destination && eruvSpot && eruvCityResolved
         ? placeEruv(
@@ -459,7 +468,7 @@ export default function App() {
       for (const b of placement.newBumps) fit = rectUnion(fit, b.bounds);
     }
 
-    return { techum, altTechum, bumps, partialCities, plan, placement, rotated, fit };
+    return { techum, altTechum, bumps, partialCities, plan, placement, hostCandidates, rotated, fit };
   }, [place, cityLoading, usingCity, cityBounds, karpefOn, detection, eruvOn, destination, eruvSpot, eruvCityState, eruvCityResolved, rotationOn, rotationOffset]);
 
   if (!apiKey || authFailed) {
@@ -481,7 +490,12 @@ export default function App() {
   const placement = view?.placement ?? null;
   const rotated = view?.rotated ?? null;
   const partialCities = view?.partialCities ?? [];
-  const eruvReachable = !!(plan?.feasibleRegion || (rotated && rotated.reachable));
+  const hostCandidates = view?.hostCandidates ?? [];
+  const eruvReachable = !!(
+    plan?.feasibleRegion ||
+    (rotated && rotated.reachable) ||
+    hostCandidates.length > 0
+  );
   const placingEruv = !!(plan && !plan.destinationInHomeTechum && eruvReachable);
   const spotOk = rotated ? rotated.inFeasible : placement?.inFeasibleRegion ?? false;
   const destOk = rotated
@@ -948,13 +962,29 @@ export default function App() {
                               of the destination. The new techum is drawn as a
                               diamond aimed at the destination.
                             </>
-                          ) : (
+                          ) : plan!.feasibleRegion ? (
                             <>
                               Click on the map inside the <b>yellow region</b>{" "}
                               (or drag the green eiruv marker) to choose where
                               the eiruv will rest. The yellow region is within
                               your current techum <i>and</i> close enough for
                               the new techum to cover the destination.
+                              {hostCandidates.length > 0 &&
+                                " Towns outlined yellow also work: an eiruv resting inside a town extends the new techum from the whole town's edge (SA HaRav 408)."}
+                            </>
+                          ) : (
+                            <>
+                              The destination is too far for an eiruv at a
+                              bare point — but{" "}
+                              {hostCandidates.length === 1
+                                ? "a town"
+                                : `${hostCandidates.length} towns`}{" "}
+                              within your techum can carry it: an eiruv
+                              resting inside a town (or its 70⅔-amah margin)
+                              extends the new techum from the <i>whole
+                              town's</i> squared edge (SA HaRav 408). Click
+                              inside a <b>yellow town area</b> to place the
+                              eiruv there.
                             </>
                           )}
                         </p>
@@ -1175,6 +1205,9 @@ export default function App() {
             }
             destination={eruvOn ? destination : null}
             feasibleRegion={placingEruv && !rotated ? plan!.feasibleRegion : null}
+            hostPlaceableRects={
+              placingEruv && !rotated ? hostCandidates.map((h) => h.placeable) : []
+            }
             feasibleRing={placingEruv && rotated ? rotated.placeRing : null}
             feasibleCircle={placingEruv && rotated ? rotated.destCircle : null}
             eruvSpot={placingEruv ? eruvSpot : null}

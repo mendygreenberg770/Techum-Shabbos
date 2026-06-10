@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeMuvlaBumps, mergeCities } from "./muvla";
+import { computeMuvlaBumps, kalsaCities, mergeCities } from "./muvla";
 import {
   expandBounds,
   metersPerDegree,
@@ -138,6 +138,47 @@ describe("muvla with a karpef-buffered base", () => {
     expect(bumps).toHaveLength(1);
     // Consumed open ground clamps at zero.
     expect(mLng(bumps[0].bounds.east)).toBeCloseTo(300 + TECHUM_M - FOUR_AMOS_M, 1);
+  });
+});
+
+describe("kalsaCities (kalsa midaso — the line ends mid-town)", () => {
+  const home = rectM(-50, -50, 50, 50);
+  const techum = expandBounds(home, TECHUM_M); // edge at x=1010
+
+  it("flags a city straddling the base techum line", () => {
+    const straddler = rectM(900, -40, 1200, 40);
+    const bumps = computeMuvlaBumps(home, techum, [straddler]);
+    expect(bumps).toHaveLength(0);
+    expect(kalsaCities(techum, bumps, [straddler])).toEqual([straddler]);
+  });
+
+  it("does not flag a straddling city that is chain-credited as muvla", () => {
+    // A in front (swallowed, x 300..500); D straddles the base line
+    // (x 900..1100) but is fully within A's corridor and extended reach
+    // — credited 4 amos, so it is reachable in full, NOT kalsa.
+    const a = rectM(300, -40, 500, 40);
+    const d = rectM(900, -30, 1100, 30);
+    const bumps = computeMuvlaBumps(home, techum, [a, d]);
+    expect(bumps.some((b) => b.city === d)).toBe(true);
+    expect(kalsaCities(techum, bumps, [a, d])).toEqual([]);
+  });
+
+  it("flags a city the muvla extension line ends inside", () => {
+    // A swallowed (x 300..500): its extension reaches
+    // far = 500 + (960 − 250 − 1.92) ≈ 1208. E spans 1100..1400 within
+    // A's corridor — the extension line ends inside it → kalsa there.
+    const a = rectM(300, -40, 500, 40);
+    const e = rectM(1100, -30, 1400, 30);
+    const bumps = computeMuvlaBumps(home, techum, [a, e]);
+    expect(bumps.some((b) => b.city === e)).toBe(false);
+    expect(kalsaCities(techum, bumps, [a, e])).toEqual([e]);
+  });
+
+  it("does not flag a city fully inside the techum or fully outside reach", () => {
+    const inside = rectM(300, -40, 500, 40);
+    const farAway = rectM(3000, -40, 3200, 40);
+    const bumps = computeMuvlaBumps(home, techum, [inside, farAway]);
+    expect(kalsaCities(techum, bumps, [inside, farAway])).toEqual([]);
   });
 });
 

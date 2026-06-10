@@ -74,6 +74,36 @@ export interface EruvPlacement {
   destinationCovered: boolean;
 }
 
+export interface HostCandidate {
+  town: Bounds;
+  /** Where the eiruv may rest to use this town: within the town (or its
+   * 70⅔-amah ibur margin) and within the home techum (reachable). */
+  placeable: Bounds;
+}
+
+/**
+ * Towns that can carry an eiruv to a destination beyond bare-point
+ * range: an eiruv resting inside a town (or its ibur margin) extends
+ * the new techum from the whole town's squared edge (SA HaRav 408), so
+ * a town that overlaps the home techum — where the placer can reach the
+ * eiruv — and whose edge is within 2,000 amos of the destination covers
+ * it even when no bare-point placement could.
+ */
+export function hostTownCandidates(
+  homeTechum: Bounds,
+  cities: Bounds[],
+  destination: LatLng,
+  techumMeters: number = TECHUM_M
+): HostCandidate[] {
+  const out: HostCandidate[] = [];
+  for (const town of cities) {
+    if (!boundsContain(expandBounds(town, techumMeters), destination)) continue;
+    const placeable = rectIntersect(expandBounds(town, KARPEF_M), homeTechum);
+    if (placeable) out.push({ town, placeable });
+  }
+  return out;
+}
+
 export function planEruv(
   homeTechum: Bounds,
   homeBumps: MuvlaBump[],
