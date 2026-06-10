@@ -163,7 +163,7 @@ describe("Rashi/Rama 408:1 — home town as 4 amos", () => {
   });
 });
 
-describe("corner-rotation kula (chabad.org #4494176)", () => {
+describe("corner-rotation kula (personal square plotted to preference)", () => {
   // Home city: 100 m square around C.
   const homeBase = rectM(-50, -50, 50, 50);
 
@@ -174,9 +174,8 @@ describe("corner-rotation kula (chabad.org #4494176)", () => {
   });
 
   it("allows placing the eiruv up to 2,000·√2 amos beyond the city line", () => {
-    // The article: rotating the square to a diamond allows an eiruv up
-    // to ~1,344 m (their 40% approximation of 960·√2 ≈ 1,357.6 m)
-    // beyond the city line.
+    // Rotating the square to a diamond allows an eiruv up to
+    // 960·√2 ≈ 1,357.6 m beyond the city line.
     const dest = at(2500, 0);
     expect(rotatedFeasible(at(1344 + 50, 0), homeBase, dest)).toBe(true);
     expect(rotatedFeasible(at(1400 + 50, 0), homeBase, dest)).toBe(false);

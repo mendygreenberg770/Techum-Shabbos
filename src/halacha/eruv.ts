@@ -60,9 +60,8 @@ export interface EruvPlacement {
    * counts as 4 amos for him. The Mechaber — and seemingly the Alter
    * Rebbe's Siddur — are stricter; the Alter Rebbe's Shulchan Aruch
    * opens with the Rama's view but the rest was never published.
-   * Common practice follows the Rama (Dayan L.Y. Raskin, in the
-   * article's comments). Whether the measure also continues beyond the
-   * town is NOT credited here (a stringency).
+   * Common practice follows the Rama. Whether the measure also
+   * continues beyond the town is NOT credited here (a stringency).
    */
   ramaCity: Bounds | null;
   /** Area gained relative to the home techum (rect parts). */
@@ -93,14 +92,14 @@ export function planEruv(
 // ---------------------------------------------------------------------------
 // Corner-rotation kula
 //
-// Per "A Practical Application of Techum Shabbat" (chabad.org #4494176):
-// for one's personal eiruv techumin, the squaring of the techum may be
-// plotted to one's preference — rotating the square to a diamond-like
-// position aims its corner at the desired direction, extending the
-// reach there to 2,000·√2 amos (~1,357.6 m; the article approximates
-// 40% ≈ 1,344 m). Applied both to placing the eiruv beyond the city
-// line and to the new techum around the eiruv. A kula — confirm with a
-// rav before relying on it.
+// A town's squaring must align with the four directions of the world
+// (so everyone squares the same town identically), but the squaring of
+// one's PERSONAL eiruv techumin may be plotted to one's preference —
+// rotating the square to a diamond-like position aims its corner at
+// the desired direction, extending the reach there to 2,000·√2 amos
+// (~1,357.6 m). Applied both to placing the eiruv beyond the city line
+// and to the new techum around the eiruv. A kula — confirm with a rav
+// before relying on it.
 // ---------------------------------------------------------------------------
 
 /** Aerial distance (m) from a point to the nearest point of a rectangle. */

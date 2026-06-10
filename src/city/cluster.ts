@@ -53,8 +53,8 @@ export interface CityDetection {
    */
   otherCities: Bounds[];
   /**
-   * Bow-shaped city flag (Nesivos Shabbos 42:17, via the article's
-   * comments): open area inside the squared city may be "filled in"
+   * Bow-shaped city flag (Mishnah Eruvin 55a; Nesivos Shabbos 42:17):
+   * open area inside the squared city may be "filled in"
    * only when the built ends flanking it are within 4,000 amos
    * (1,920 m). When an interior open stretch along a cardinal line
    * exceeds that, this holds its size in meters (a heuristic — review

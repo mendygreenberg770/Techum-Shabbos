@@ -142,81 +142,64 @@ React + TypeScript (Vite)
 | 3 | Eiruv techumin planner: feasible region, new techum, gained/lost overlay, checklist + nusach |
 | 4 | City-as-4-amos logic for the eiruv (408:1), saved locations, shareable links, PWA/mobile polish |
 
-## 6. Rules adopted from "A Practical Application of Techum Shabbat"
-
-From the chabad.org article (#4494176) by **Rabbi (Dayan) Levi Yitzchak
-Raskin** of London, on walking between Borehamwood and Edgware — including
-the reader comments and the author's replies:
-
-### From the article body
+## 6. Practical rules encoded (primary sources)
 
 1. **A town counts as 4 amos**: the techum concern applies only when
-   walking outside a built-up area. *(Matches: the app measures from the
-   city edge.)*
-2. **2,000 amos = 960 m** (amah = 48 cm). A commenter (Zalman) notes the
-   exact imperial conversion is **3,149.6 ft**, not the article's 3,158 ft.
-   *(The app shows the exact figure.)*
-3. **Iburah shel Ir**: the first 70⅔ amos around a town; a single house
+   walking outside a built-up area (SA HaRav 396, 398). *(The app
+   measures from the city edge.)*
+2. **2,000 amos = 960 m** (amah = 48 cm, Reb Chaim Naeh) = 3,149.6 ft.
+3. **Ibur ha'ir**: the first 70⅔ amos around a town; a single house
    within that margin extends the town's borders — but a lone house
-   *beyond* the margin grants nothing (the article explicitly dispels the
-   myth that any house on the way restarts the 2,000). *(Matches the
-   clustering rule.)*
-4. **Two townships join** when their 70-amah-plus margins overlap (total
-   ≈ 2 × 33.92 m). A motorway or rail track in the gap does **not** itself
-   split a town — only the measured distance matters (the article's M1 /
-   rail-track example). *(Matches; the app ignores roads and measures
-   gaps.)*
-5. **The tether (kalsa midaso)**: one who walks from town A into town B is
-   stopped mid-town the moment his 2,000 amos run out — "as if held by a
-   tether anchored at the border of town A." *(Implemented: such cities
-   are outlined red with a warning.)*
+   *beyond* the margin grants nothing (it does not restart the 2,000)
+   (SA HaRav 398). *(Matches the clustering rule.)*
+4. **Two townships join** when their 70⅔-amah margins overlap (total
+   141⅓ amos = 67.84 m). A motorway, rail track, or river in the gap does
+   **not** itself split a town — only the measured distance matters
+   (SA HaRav 398). *(The app ignores roads and measures gaps.)*
+5. **Kalsa midaso**: one who walks from town A into town B is stopped
+   mid-town the moment his 2,000 amos run out — as if tethered at town
+   A's border (SA 408:1). *(Such cities are outlined red with a
+   warning.)*
 6. **Squaring**: furthest houses in the four directions, rectangle drawn
    around them; enclosed open space counts as if full of dwellings. A
    town's squaring must align with **the four directions of the world** —
-   otherwise two people would square the same town differently. *(Matches
-   the north-aligned model.)*
-7. **Corner-rotation kula (par. 13)**: the world-alignment constraint does
-   **not** apply to one's *personal* eiruv techumin square — one may plot
-   it to his preference, rotating it to a "diamond" position, gaining
-   ~40% (2,000·√2 amos ≈ 1,357.6 m; the article approximates 1,344 m) in
-   the chosen direction, both for placing the eiruv beyond the town line
-   and for the reach of the new techum. *(Implemented as an opt-in
-   toggle.)*
-8. **The trade-off (par. 14)**: aiming the diamond one way sacrifices
-   breadth elsewhere — the square can be re-aimed (e.g., to keep a walking
-   road inside it) at the cost of reach toward the destination; one must
-   plot a clear walking route. *(Implemented: a rotation slider re-aims
-   the diamond and the coverage check follows it.)*
-9. **Satellite vs. land measurement**: halachic measurement is a hands-on
-   process that may well produce different results than satellite imagery.
-   *(Added to the app's disclaimer.)*
-
-### From the comments
-
-10. **Rashi/Rama 408:1 — home town as 4 amos** (reply to Mendel G): one
-    who places an eiruv outside his town keeps his entire town — where he
-    physically spends the onset of Shabbos — as 4 amos, even though the
-    eiruv defines his dwelling, and even when the town is not fully
-    within the eiruv's 2,000. The Mechaber does not accept this leniency;
-    **the Alter Rebbe's Shulchan Aruch opens with the Rama's view but the
-    rest was never published, and his Siddur seems to follow the stricter
-    view; common practice follows the Rama.** *(Implemented as a toggle,
-    default ON per common practice, with the sources noted. Whether the
-    measure also continues beyond the town is not credited — a
-    stringency.)*
-11. **Bow-shaped city — the limit of squaring** (reply to Julian Czarny,
-    citing **Nesivos Shabbos 42:17**): one may not square an entire
-    metropolis into one rectangle; where the squared area includes
-    swathes of open land whose flanking built ends are more than
-    **4,000 amos** apart (the Mishnah's bow-shaped city), the open area
-    cannot be "filled in" by squaring — each area must be squared
-    individually. *(Implemented as an automatic warning: the app scans
-    the squared city for interior open stretches over 1,920 m and flags
-    them for manual/rabbinic review.)*
-12. **London Beth Din caution**: despite the geometry, the practical psak
-    for Borehamwood–Edgware is that there is currently no permissible
-    route. *(In the planner's checklist: the app cannot replace the local
-    rav.)*
+   otherwise two people would square the same town differently
+   (SA HaRav 398). *(Matches the north-aligned model.)*
+7. **Corner-rotation kula**: the world-alignment constraint does **not**
+   apply to one's *personal* eiruv techumin square — one may plot it to
+   his preference, rotating it to a "diamond" position, gaining ~40%
+   (2,000·√2 amos ≈ 1,357.6 m) in the chosen direction, both for placing
+   the eiruv beyond the town line and for the reach of the new techum.
+   *(Opt-in toggle, flagged as a kula to confirm with a rav.)*
+8. **The diamond trade-off**: aiming it one way sacrifices breadth
+   elsewhere — it can be re-aimed (e.g., to keep a walking road inside
+   it) at the cost of reach toward the destination; one must plot a
+   clear walking route. *(A rotation slider re-aims the diamond and the
+   coverage check follows it.)*
+9. **Satellite vs. land measurement**: halachic measurement (50-amah
+   rope, by an expert, with havla'ah rules for hills — SA HaRav 399) is
+   a hands-on process that may produce different results than map
+   imagery. *(In the app's disclaimer.)*
+10. **Rashi/Rama 408:1 — home town as 4 amos**: one who places an eiruv
+    outside his town keeps his entire town — where he physically spends
+    the onset of Shabbos — as 4 amos, even when the town is not fully
+    within the eiruv's 2,000. The Mechaber does not accept this
+    leniency; the Alter Rebbe's Shulchan Aruch opens with the Rama's
+    view but the rest was never published, and his Siddur seems to
+    follow the stricter view; **common practice follows the Rama**.
+    *(Applied by default — no toggle; the other opinions are explained
+    in the in-app sources panel. Whether the measure also continues
+    beyond the town is not credited — a stringency.)*
+11. **Bow-shaped city — the limit of squaring** (Mishnah Eruvin 55a;
+    Nesivos Shabbos 42:17): one may not square an entire metropolis
+    into one rectangle; where the squared area includes swathes of open
+    land whose flanking built ends are more than **4,000 amos** apart,
+    the open area cannot be "filled in" by squaring — each area must be
+    squared individually. *(Automatic warning: the app scans the
+    squared city for interior open stretches over 1,920 m.)*
+12. **Practical-psak caution**: even where the geometry looks workable,
+    local rabbanim may rule that a route cannot be relied on in
+    practice. *(A standing item in the planner's checklist.)*
 
 ## 7. Supplementary dinim (sources beyond Shulchan Aruch HaRav)
 
