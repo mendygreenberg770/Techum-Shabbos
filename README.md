@@ -10,17 +10,33 @@ See [DESIGN.md](DESIGN.md) for the full design and roadmap.
 > **Disclaimer:** this tool is an aid for learning and planning only.
 > Consult a rav before relying on any boundary or eiruv it shows.
 
-## Current status (Phase 1)
+## Current status (Phase 2)
 
 - Address search (Places autocomplete, with a plain geocoder fallback)
-- Point-based techum: a north-aligned square extending 2,000 amos (960 m)
-  in every direction from the address (ribua ha'olam — corners included)
-- Optional 2,000-amah radius circle overlay for illustration
+- **City detection**: building footprints are fetched from OpenStreetMap
+  (Overpass API) around the address and clustered by the halachic joining
+  distances — a gap of up to 70⅔ amos (33.92 m) joins buildings into one
+  city, and two cities join within 141⅓ amos (67.84 m). The cluster
+  containing the address becomes the halachic city.
+- The city is squared as a north-aligned rectangle (ribua ha'olam) and the
+  techum extends 2,000 amos (960 m) from its edge, corners included.
+- **Karpef toggle**: optionally add 70⅔ amos around the city before
+  measuring (the machlokes in SA 398:5) — the other opinion's line is shown
+  in gray for comparison.
+- **Manual adjustment**: the green city rectangle can be dragged/resized if
+  the detection is off, with a reset back to the detected boundary.
+- **Truncation warnings**: if the built-up area reaches the edge of the
+  analysis radius, the app says so explicitly (the true techum extends
+  further on those sides) rather than showing a misleading line.
+- Point mode (lone dwelling) remains available as a stringent fallback and
+  is used automatically when no buildings are found near the address.
 
-Phase 2 adds detection of the halachic city from building footprints, so the
-techum is measured from the edge of the squared city. Until then, inside a
-built-up area the point-based square may understate the techum (a stringency),
-never overstate it.
+Map legend: orange = detected building cluster (convex hull), green =
+squared city, blue = techum, gray = the other karpef opinion's techum.
+
+Phase 3 adds the eiruv techumin planner. Known limitations: all structures
+are counted (which structures halachically join the city is an open item),
+multipolygon buildings are skipped, and OpenStreetMap coverage varies.
 
 ## Setup
 
