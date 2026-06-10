@@ -37,6 +37,7 @@ import {
   TECHUM_AMOS,
   TECHUM_CORNER_M,
   TECHUM_M,
+  TWO_CITIES_JOIN_M,
 } from "./halacha/shiurim";
 import { loadGoogleMaps, onAuthFailure } from "./maps/loader";
 import type { SelectedPlace } from "./maps/geocode";
@@ -138,6 +139,9 @@ export default function App() {
   /** Default view: plain city outline + square + techum. Details add
    * non-joining neighbors, comparison lines, and gap highlights. */
   const [showDetails, setShowDetails] = useState(false);
+  /** Measuring ruler: two map clicks → distance in amos. */
+  const [measureOn, setMeasureOn] = useState(false);
+  const [measurePts, setMeasurePts] = useState<LatLng[]>([]);
 
   const [eruvOn, setEruvOn] = useState(!!initial?.eruv);
   const [destination, setDestination] = useState<SelectedPlace | null>(
@@ -839,7 +843,7 @@ export default function App() {
                     </p>
                   )}
                 {usingCity && detection?.bowGapM != null && (
-                  <p className="warning">
+                  <div className="warning">
                     ⚠ <b>Bow-shaped city</b> (Mishnah Eruvin 55a; Nesivos
                     Shabbos 42:17): squaring may "fill in" open land between
                     built areas only when the built ends flanking it are
@@ -850,9 +854,20 @@ export default function App() {
                     cannot bridge. The built section on the far side of such
                     a stretch may not really be part of your techum; each
                     section may need to be squared on its own. Review with a
-                    rav, and consider adjusting the boundary manually to
-                    cover only the connected section where you are.
-                  </p>
+                    rav.
+                    {detection.sectionBounds && !manualCityBounds && (
+                      <div className="saved-actions" style={{ marginTop: 8 }}>
+                        <button
+                          className="mini-button"
+                          onClick={() =>
+                            setManualCityBounds(detection.sectionBounds)
+                          }
+                        >
+                          ▢ Use my section's square only (stringency)
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 )}
                 {usingCity && partialCities.length > 0 && (
                   <p className="warning">
@@ -1210,6 +1225,40 @@ export default function App() {
               </div>
             )}
 
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={measureOn}
+                onChange={(e) => {
+                  setMeasureOn(e.target.checked);
+                  setMeasurePts([]);
+                }}
+              />
+              📏 Measure a distance in amos (tap two points on the map —
+              e.g., a gap between houses, to check the joining shiurim)
+            </label>
+            {measureOn && measurePts.length === 2 && (() => {
+              const m = distanceMeters(measurePts[0], measurePts[1]);
+              const amos = m / AMAH_M;
+              return (
+                <p className={amos <= TWO_CITIES_JOIN_M / AMAH_M ? "success" : "muted"}>
+                  Measured: <b>{amos.toFixed(1)} amos</b> ({m.toFixed(1)} m).{" "}
+                  {amos <= KARPEF_M / AMAH_M
+                    ? "Within 70⅔ amos — a structure at this gap joins the city (SA HaRav 398)."
+                    : amos <= TWO_CITIES_JOIN_M / AMAH_M
+                      ? "Beyond 70⅔ amos (a lone house at this gap does NOT join) but within 141⅓ — two TOWNS at this gap join as one."
+                      : "Beyond 141⅓ amos — nothing joins across this gap."}{" "}
+                  Tap again to start a new measurement.
+                </p>
+              );
+            })()}
+            {measureOn && measurePts.length < 2 && (
+              <p className="muted">
+                Tap {measurePts.length === 0 ? "the first" : "the second"}{" "}
+                point on the map…
+              </p>
+            )}
+
             <details className="legend">
               <summary>Map legend</summary>
               <ul>
@@ -1313,6 +1362,11 @@ export default function App() {
             }
             gained={!rotated ? placement?.gained ?? [] : []}
             lost={!rotated ? placement?.lost ?? [] : []}
+            measureActive={measureOn}
+            measurePoints={measurePts}
+            onMeasurePoint={(p) =>
+              setMeasurePts((prev) => (prev.length >= 2 ? [p] : [...prev, p]))
+            }
             fitBounds={view?.fit ?? null}
             fitKey={`${place?.address ?? ""}|${mode}|${usingCity ? "city" : "point"}|${limitKey}|${eruvOn}|${destination?.address ?? ""}|${placement ? "placed" : ""}|${rotationOn}`}
           />

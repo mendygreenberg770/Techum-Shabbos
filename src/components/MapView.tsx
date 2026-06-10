@@ -44,6 +44,10 @@ interface Props {
   newTechumBumps: Bounds[];
   gained: Bounds[];
   lost: Bounds[];
+  /** Measuring ruler: when active, map clicks set the two endpoints. */
+  measureActive: boolean;
+  measurePoints: LatLng[];
+  onMeasurePoint: (p: LatLng) => void;
   /** Viewport: refit to fitBounds when fitKey changes. */
   fitBounds: Bounds | null;
   fitKey: string;
@@ -189,6 +193,8 @@ export default function MapView(props: Props) {
   const newBumpPool = useRef<google.maps.Rectangle[]>([]);
   const gainedPool = useRef<google.maps.Rectangle[]>([]);
   const lostPool = useRef<google.maps.Rectangle[]>([]);
+  const measureLineRef = useRef<google.maps.Polyline | null>(null);
+  const measureDotPool = useRef<google.maps.Marker[]>([]);
   const lastFitKey = useRef("");
   const appliedCityBounds = useRef<Bounds | null>(null);
   const propsRef = useRef(props);
@@ -211,7 +217,11 @@ export default function MapView(props: Props) {
       });
       map.addListener("click", (e: google.maps.MapMouseEvent) => {
         const p = propsRef.current;
-        if (p.eruvPlacingActive && e.latLng) {
+        if (!e.latLng) return;
+        // The ruler takes precedence while active.
+        if (p.measureActive) {
+          p.onMeasurePoint({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+        } else if (p.eruvPlacingActive) {
           p.onEruvSpotChange({ lat: e.latLng.lat(), lng: e.latLng.lng() });
         }
       });
@@ -246,6 +256,7 @@ export default function MapView(props: Props) {
     newTechumBumps,
     gained,
     lost,
+    measurePoints,
     fitBounds,
     fitKey,
   } = props;
@@ -485,6 +496,45 @@ export default function MapView(props: Props) {
     syncRects(newBumpPool.current, map, newTechumBounds ? newTechumBumps : [], NEW_TECHUM_STYLE);
     syncRects(gainedPool.current, map, gained, GAINED_STYLE);
     syncRects(lostPool.current, map, lost, LOST_STYLE);
+
+    // Measuring ruler: endpoints + connecting line.
+    if (!measureLineRef.current) {
+      measureLineRef.current = new google.maps.Polyline({
+        strokeColor: "#1c1c1c",
+        strokeOpacity: 0.9,
+        strokeWeight: 2,
+        clickable: false,
+      });
+    }
+    if (measurePoints.length === 2) {
+      measureLineRef.current.setPath(measurePoints);
+      measureLineRef.current.setMap(map);
+    } else {
+      measureLineRef.current.setMap(null);
+    }
+    while (measureDotPool.current.length < measurePoints.length) {
+      measureDotPool.current.push(
+        new google.maps.Marker({
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 5,
+            fillColor: "#1c1c1c",
+            fillOpacity: 1,
+            strokeColor: "#ffffff",
+            strokeWeight: 1.5,
+          },
+          clickable: false,
+        })
+      );
+    }
+    measureDotPool.current.forEach((m, i) => {
+      if (i < measurePoints.length) {
+        m.setPosition(measurePoints[i]);
+        m.setMap(map);
+      } else {
+        m.setMap(null);
+      }
+    });
 
     // Fit the viewport on meaningful changes only (not on drags/edits).
     if (fitKey !== lastFitKey.current && fitBounds) {

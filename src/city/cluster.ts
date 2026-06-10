@@ -71,6 +71,14 @@ export interface CityDetection {
   /** The over-limit open stretches themselves, as lat/lng rectangles
    * for highlighting on the map (largest first, capped). */
   bowGapRects: Bounds[];
+  /**
+   * When the bow rule disqualifies the full square: a conservative
+   * alternative square covering only the area around the user where
+   * every open stretch is within 4,000 amos of built ends — i.e., may
+   * legitimately be "squared in" (Nesivos Shabbos 42:17). Offered as a
+   * one-click stringent boundary; null when the full square is fine.
+   */
+  sectionBounds: Bounds | null;
   /** Member building footprints of the user's cluster (references to
    * the input rings) — the accurate city shape is drawn from these. */
   clusterRings: LatLng[][];
@@ -458,7 +466,20 @@ export function detectCity(
     }
   }
 
-  const bow = bowGaps(clusterVerts, center, perDegLat, perDegLng);
+  const userB = buildings[nearestIdx];
+  const bow = bowGaps(
+    clusterVerts,
+    center,
+    perDegLat,
+    perDegLng,
+    (userB.minX + userB.maxX) / 2,
+    (userB.minY + userB.maxY) / 2
+  );
+  // The section square never exceeds the actual cluster extent (cells
+  // are 200 m quanta).
+  const sectionBounds = bow?.sectionBounds
+    ? rectIntersect(bow.sectionBounds, bounds)
+    : null;
 
   return {
     bounds,
@@ -471,6 +492,7 @@ export function detectCity(
     otherCities,
     bowGapM: bow?.maxGapM ?? null,
     bowGapRects: bow?.rects ?? [],
+    sectionBounds,
     clusterRings,
     neighborRings,
   };
@@ -479,6 +501,9 @@ export function detectCity(
 interface BowGapInfo {
   maxGapM: number;
   rects: Bounds[];
+  /** A conservative squared boundary limited to the legitimately
+   * "fillable" area around the user (see CityDetection.sectionBounds). */
+  sectionBounds: Bounds | null;
 }
 
 /** Most rectangles to highlight — enough to outline the open region
@@ -496,7 +521,9 @@ function bowGaps(
   clusterVerts: Vertex[],
   center: LatLng,
   perDegLat: number,
-  perDegLng: number
+  perDegLng: number,
+  userX: number,
+  userY: number
 ): BowGapInfo | null {
   const CELL = 200;
   const LIMIT = 2 * TECHUM_M; // 4,000 amos = 1,920 m
@@ -540,5 +567,72 @@ function bowGaps(
   scan(occupiedT, false);
   if (maxGapM <= LIMIT) return null;
   gaps.sort((a, b) => b.gapM - a.gapM);
-  return { maxGapM, rects: gaps.slice(0, MAX_BOW_RECTS).map((g) => g.rect) };
+
+  // The conservative adjusted square: "fill" open cells only where the
+  // built ends flanking them are within 4,000 amos (rows, then columns,
+  // then rows again), and grow the largest axis-aligned rectangle of
+  // legitimately filled cells around the user. Everything in it may be
+  // squared in; using it instead of the full bounding box is a
+  // stringency offered when the full square fails the bow rule.
+  const MAX_FILL_STEPS = Math.floor(LIMIT / CELL) + 1; // cell-index diff ≤ 10
+  const filled = new Map<number, Set<number>>();
+  for (const [cy, set] of occupied) filled.set(cy, new Set(set));
+  const fillLines = (transpose: boolean) => {
+    // Collect per-line sorted cells (rows when !transpose, else columns).
+    const lines = new Map<number, number[]>();
+    for (const [cy, set] of filled) {
+      for (const cx of set) {
+        const line = transpose ? cx : cy;
+        const along = transpose ? cy : cx;
+        if (!lines.has(line)) lines.set(line, []);
+        lines.get(line)!.push(along);
+      }
+    }
+    for (const [line, cells] of lines) {
+      const sorted = [...new Set(cells)].sort((a, b) => a - b);
+      for (let i = 1; i < sorted.length; i++) {
+        if (sorted[i] - sorted[i - 1] > MAX_FILL_STEPS) continue;
+        for (let a = sorted[i - 1] + 1; a < sorted[i]; a++) {
+          const cy = transpose ? a : line;
+          const cx = transpose ? line : a;
+          if (!filled.has(cy)) filled.set(cy, new Set());
+          filled.get(cy)!.add(cx);
+        }
+      }
+    }
+  };
+  fillLines(false);
+  fillLines(true);
+  fillLines(false);
+
+  const isFilled = (cy: number, cx: number) => filled.get(cy)?.has(cx) ?? false;
+  const ucx = Math.floor(userX / CELL);
+  const ucy = Math.floor(userY / CELL);
+  let sectionBounds: Bounds | null = null;
+  if (isFilled(ucy, ucx)) {
+    let x0 = ucx, x1 = ucx, y0 = ucy, y1 = ucy;
+    let grew = true;
+    while (grew) {
+      grew = false;
+      const colOk = (cx: number) => {
+        for (let cy = y0; cy <= y1; cy++) if (!isFilled(cy, cx)) return false;
+        return true;
+      };
+      const rowOk = (cy: number) => {
+        for (let cx = x0; cx <= x1; cx++) if (!isFilled(cy, cx)) return false;
+        return true;
+      };
+      if (colOk(x1 + 1)) { x1++; grew = true; }
+      if (colOk(x0 - 1)) { x0--; grew = true; }
+      if (rowOk(y1 + 1)) { y1++; grew = true; }
+      if (rowOk(y0 - 1)) { y0--; grew = true; }
+    }
+    sectionBounds = toBounds(x0 * CELL, y0 * CELL, (x1 + 1) * CELL, (y1 + 1) * CELL);
+  }
+
+  return {
+    maxGapM,
+    rects: gaps.slice(0, MAX_BOW_RECTS).map((g) => g.rect),
+    sectionBounds,
+  };
 }
