@@ -159,11 +159,31 @@ describe("detectCity: bow-shaped city (Nesivos Shabbos 42:17)", () => {
     expect(det.clusterSize).toBe(buildings.length); // all joined (30 m gaps)
     expect(det.bowGapM).not.toBeNull();
     expect(det.bowGapM!).toBeGreaterThan(1920);
+    // The gap locations are reported, inside the cluster's open middle
+    // (grid-quantized: bands may stick out up to one 200 m cell).
+    expect(det.bowGapRects.length).toBeGreaterThan(0);
+    const slackLat = 200 / perDegLat;
+    const slackLng = 200 / perDegLng;
+    for (const r of det.bowGapRects) {
+      expect(r.north).toBeLessThanOrEqual(det.bounds.north + slackLat);
+      expect(r.south).toBeGreaterThanOrEqual(det.bounds.south - slackLat);
+      expect(r.east).toBeLessThanOrEqual(det.bounds.east + slackLng);
+      expect(r.west).toBeGreaterThanOrEqual(det.bounds.west - slackLng);
+    }
+    // The biggest reported stretch matches the open interior (~2,200 m
+    // between the arms' building edges, grid-quantized).
+    const r0 = det.bowGapRects[0];
+    const spanM = Math.max(
+      (r0.north - r0.south) * perDegLat,
+      (r0.east - r0.west) * perDegLng
+    );
+    expect(spanM).toBeGreaterThan(1920);
   });
 
   it("does not flag a compact town", () => {
     const det = detectCity(C, [rect(0, 0), rect(40, 0), rect(80, 0)], area(2000))!;
     expect(det.bowGapM).toBeNull();
+    expect(det.bowGapRects).toEqual([]);
   });
 });
 

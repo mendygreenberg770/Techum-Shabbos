@@ -61,6 +61,9 @@ export interface CityDetection {
    * with a rav); null when the squared city has no such stretch.
    */
   bowGapM: number | null;
+  /** The over-limit open stretches themselves, as lat/lng rectangles
+   * for highlighting on the map (largest first, capped). */
+  bowGapRects: Bounds[];
 }
 
 interface Vertex {
@@ -421,6 +424,8 @@ export function detectCity(
     }
   }
 
+  const bow = bowGaps(clusterVerts, center, perDegLat, perDegLng);
+
   return {
     bounds,
     hull: convexHull(clusterVerts).map((v) => ({ lat: v.lat, lng: v.lng })),
@@ -429,16 +434,33 @@ export function detectCity(
     nearestBuildingM: nearestDist,
     truncatedSides: [...truncated],
     otherCities,
-    bowGapM: bowGap(clusterVerts),
+    bowGapM: bow?.maxGapM ?? null,
+    bowGapRects: bow?.rects ?? [],
   };
 }
 
+interface BowGapInfo {
+  maxGapM: number;
+  rects: Bounds[];
+}
+
+/** Most rectangles to highlight — enough to outline the open region
+ * without flooding the map on metro-scale clusters. */
+const MAX_BOW_RECTS = 80;
+
 /**
- * Largest interior open stretch along a cardinal line of the cluster's
- * occupancy grid, when it exceeds 4,000 amos — the bow-city limit on
- * squaring (Nesivos Shabbos 42:17). Null otherwise.
+ * Interior open stretches along cardinal lines of the cluster's
+ * occupancy grid that exceed 4,000 amos — the bow-city limit on
+ * squaring (Mishnah Eruvin 55a; Nesivos Shabbos 42:17). Returns the
+ * largest gap and the gaps' locations as lat/lng rectangles; null when
+ * the squared city has no such stretch.
  */
-function bowGap(clusterVerts: Vertex[]): number | null {
+function bowGaps(
+  clusterVerts: Vertex[],
+  center: LatLng,
+  perDegLat: number,
+  perDegLng: number
+): BowGapInfo | null {
   const CELL = 200;
   const LIMIT = 2 * TECHUM_M; // 4,000 amos = 1,920 m
   const occupied = new Map<number, Set<number>>(); // row (cy) -> set of cx
@@ -451,15 +473,35 @@ function bowGap(clusterVerts: Vertex[]): number | null {
     if (!occupiedT.has(cx)) occupiedT.set(cx, new Set());
     occupiedT.get(cx)!.add(cy);
   }
+  const toBounds = (x0: number, y0: number, x1: number, y1: number): Bounds => ({
+    south: center.lat + y0 / perDegLat,
+    north: center.lat + y1 / perDegLat,
+    west: center.lng + x0 / perDegLng,
+    east: center.lng + x1 / perDegLng,
+  });
+  const gaps: { gapM: number; rect: Bounds }[] = [];
   let maxGapM = 0;
-  for (const lines of [occupied, occupiedT]) {
-    for (const cellsInLine of lines.values()) {
+  const scan = (lines: Map<number, Set<number>>, isRow: boolean) => {
+    for (const [line, cellsInLine] of lines) {
       const sorted = [...cellsInLine].sort((a, b) => a - b);
       for (let i = 1; i < sorted.length; i++) {
         const gapM = (sorted[i] - sorted[i - 1] - 1) * CELL;
         if (gapM > maxGapM) maxGapM = gapM;
+        if (gapM <= LIMIT) continue;
+        const a0 = (sorted[i - 1] + 1) * CELL; // gap start along the line
+        const a1 = sorted[i] * CELL; // gap end along the line
+        const b0 = line * CELL; // the line's own cell band
+        const b1 = (line + 1) * CELL;
+        gaps.push({
+          gapM,
+          rect: isRow ? toBounds(a0, b0, a1, b1) : toBounds(b0, a0, b1, a1),
+        });
       }
     }
-  }
-  return maxGapM > LIMIT ? maxGapM : null;
+  };
+  scan(occupied, true);
+  scan(occupiedT, false);
+  if (maxGapM <= LIMIT) return null;
+  gaps.sort((a, b) => b.gapM - a.gapM);
+  return { maxGapM, rects: gaps.slice(0, MAX_BOW_RECTS).map((g) => g.rect) };
 }

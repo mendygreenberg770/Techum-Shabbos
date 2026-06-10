@@ -22,6 +22,7 @@ import { computeMuvlaBumps, mergeCities, rectContainedIn } from "./halacha/muvla
 import {
   distanceMeters,
   expandBounds,
+  metersPerDegree,
   pointBounds,
   rectIntersect,
   rectUnion,
@@ -472,6 +473,28 @@ export default function App() {
       ? distanceMeters(place.location, destination.location)
       : null;
 
+  // Per-extension numbers for the ir muvla'as explanation: how deep the
+  // swallowed city is and how far the techum continues past the base line.
+  const bumpDetails = (() => {
+    if (!view || !place || view.bumps.length === 0) return [];
+    const { perDegLat, perDegLng } = metersPerDegree(place.location.lat);
+    return view.bumps.map((b) => {
+      const extM =
+        b.side === "east"
+          ? (b.bounds.east - view.techum.east) * perDegLng
+          : b.side === "west"
+            ? (view.techum.west - b.bounds.west) * perDegLng
+            : b.side === "north"
+              ? (b.bounds.north - view.techum.north) * perDegLat
+              : (view.techum.south - b.bounds.south) * perDegLat;
+      const cityDepthM =
+        b.side === "east" || b.side === "west"
+          ? (b.city.east - b.city.west) * perDegLng
+          : (b.city.north - b.city.south) * perDegLat;
+      return { side: b.side, extM, cityDepthM };
+    });
+  })();
+
   return (
     <div className="layout">
       <aside className="sidebar">
@@ -659,23 +682,61 @@ export default function App() {
                   </p>
                 )}
                 {usingCity && view && view.bumps.length > 0 && (
-                  <p className="muted">
-                    {view.bumps.length} neighboring{" "}
-                    {view.bumps.length === 1 ? "city is" : "cities are"} fully
-                    swallowed within the techum and count as only 4 amos — the
-                    techum extends beyond {view.bumps.length === 1 ? "it" : "them"}{" "}
-                    (blue extensions; SA HaRav 408:1).
-                  </p>
+                  <div className="success">
+                    ✓ <b>Ir muvla'as</b> (SA HaRav 408:1):{" "}
+                    {view.bumps.length === 1
+                      ? "a neighboring city lies"
+                      : `${view.bumps.length} neighboring cities lie`}{" "}
+                    <i>entirely</i> within the techum (filled light blue on
+                    the map). A swallowed city consumes only <b>4 amos</b> of
+                    the 2,000-amah measure: the open land up to it counts in
+                    full, the whole city costs just 4 amos, and the rest of
+                    the measure continues past its far edge — the blue
+                    extension{view.bumps.length === 1 ? "" : "s"} beyond the
+                    base square show the techum actually gained:
+                    <ul>
+                      {bumpDetails.map((d, i) => (
+                        <li key={i}>
+                          To the <b>{d.side}</b>: the swallowed city
+                          (≈{Math.round(d.cityDepthM).toLocaleString()} m
+                          across) costs 4 amos (≈1.9 m) instead of its real
+                          depth, so the techum continues ≈
+                          <b>{Math.round(d.extM).toLocaleString()} m</b>{" "}
+                          beyond the base 2,000-amah line.
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
+                {usingCity &&
+                  view &&
+                  view.bumps.length === 0 &&
+                  (detection?.otherCities.length ?? 0) > 0 && (
+                    <p className="muted">
+                      Ir muvla'as check (SA HaRav 408:1):{" "}
+                      {detection!.otherCities.length} neighboring built-up
+                      area{detection!.otherCities.length === 1 ? "" : "s"}{" "}
+                      examined — none lies <i>entirely</i> within the techum,
+                      so no city counts as 4 amos and the techum is not
+                      extended. (A city only <i>partly</i> inside — outlined
+                      red — gives no extension; within it you stop at the
+                      line.)
+                    </p>
+                  )}
                 {usingCity && detection?.bowGapM != null && (
                   <p className="warning">
-                    ⚠ Bow-shaped city: the squared boundary spans open
-                    stretches of ≈{Math.round(detection.bowGapM).toLocaleString()}{" "}
-                    m between built areas. Open land may be "filled in" by
-                    squaring only when the built ends flanking it are within
-                    4,000 amos = 1,920 m (Nesivos Shabbos 42:17) — parts of
-                    this square may not be walkable. Review with a rav and
-                    consider adjusting the boundary manually.
+                    ⚠ <b>Bow-shaped city</b> (Mishnah Eruvin 55a; Nesivos
+                    Shabbos 42:17): squaring may "fill in" open land between
+                    built areas only when the built ends flanking it are
+                    within 4,000 amos = 1,920 m of each other. This squared
+                    boundary spans open stretches up to ≈
+                    {Math.round(detection.bowGapM).toLocaleString()} m wide —{" "}
+                    <b>highlighted magenta on the map</b> — which squaring
+                    cannot bridge. The built section on the far side of such
+                    a stretch may not really be part of your techum; each
+                    section may need to be squared on its own. Review with a
+                    rav, and consider adjusting the boundary manually to
+                    cover only the connected section where you are.
                   </p>
                 )}
                 {usingCity && partialCities.length > 0 && (
@@ -1011,6 +1072,8 @@ export default function App() {
                 <li><span className="swatch" style={{ background: "#e66100" }} /> Detected city cluster (hull)</li>
                 <li><span className="swatch" style={{ background: "#26a269" }} /> Squared city</li>
                 <li><span className="swatch" style={{ background: "#1a5fb4" }} /> Techum (incl. muvla extensions)</li>
+                <li><span className="swatch" style={{ background: "#99c1f1" }} /> City swallowed in the techum (muvla — counts as 4 amos)</li>
+                <li><span className="swatch" style={{ background: "#d4267e" }} /> Open stretch too wide to "square in" (bow-city warning)</li>
                 <li><span className="swatch" style={{ background: "#5e5c64" }} /> Other karpef opinion</li>
                 <li><span className="swatch" style={{ background: "#c01c28" }} /> City the techum ends inside (kalsa midaso)</li>
                 <li><span className="swatch" style={{ background: "#f5c211" }} /> Eiruv feasible region</li>
@@ -1073,6 +1136,9 @@ export default function App() {
             onCityBoundsChange={(b) => setManualCityBounds(b)}
             showRadiusCircle={mode === "point" && showRadiusCircle}
             partialCities={partialCities}
+            bowGapRects={
+              usingCity && !manualCityBounds ? detection?.bowGapRects ?? [] : []
+            }
             destination={eruvOn ? destination : null}
             feasibleRegion={placingEruv && !rotated ? plan!.feasibleRegion : null}
             feasibleRing={placingEruv && rotated ? rotated.placeRing : null}

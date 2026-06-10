@@ -8,10 +8,12 @@ interface Props {
   /** The techum to display (blue) and its muvla extensions. */
   techumBounds: Bounds | null;
   techumBumps: Bounds[];
-  /** Cities swallowed within the techum (thin green outline). */
+  /** Cities swallowed within the techum — muvla, count as 4 amos (light blue fill). */
   swallowedCities: Bounds[];
   /** Cities the techum line ends inside of — kalsa midaso (red outline). */
   partialCities: Bounds[];
+  /** Open stretches too wide to be "squared in" (bow-city warning, magenta). */
+  bowGapRects: Bounds[];
   /** The other karpef opinion's techum, for comparison (thin gray). */
   altTechumBounds: Bounds | null;
   /** The squared city (green); editable when cityEditable is set. */
@@ -54,10 +56,20 @@ const TECHUM_STYLE: google.maps.RectangleOptions = {
 };
 
 const SWALLOWED_STYLE: google.maps.RectangleOptions = {
-  strokeColor: "#26a269",
-  strokeOpacity: 0.8,
+  strokeColor: "#1a5fb4",
+  strokeOpacity: 0.9,
+  strokeWeight: 1.5,
+  fillColor: "#99c1f1",
+  fillOpacity: 0.3,
+  clickable: false,
+};
+
+const BOW_GAP_STYLE: google.maps.RectangleOptions = {
+  strokeColor: "#d4267e",
+  strokeOpacity: 0.7,
   strokeWeight: 1,
-  fillOpacity: 0,
+  fillColor: "#d4267e",
+  fillOpacity: 0.18,
   clickable: false,
 };
 
@@ -153,6 +165,7 @@ export default function MapView(props: Props) {
   const bumpPool = useRef<google.maps.Rectangle[]>([]);
   const swallowedPool = useRef<google.maps.Rectangle[]>([]);
   const partialPool = useRef<google.maps.Rectangle[]>([]);
+  const bowGapPool = useRef<google.maps.Rectangle[]>([]);
   const feasibleRingRef = useRef<google.maps.Polygon | null>(null);
   const feasibleCircleRef = useRef<google.maps.Circle | null>(null);
   const diamondRef = useRef<google.maps.Polygon | null>(null);
@@ -198,6 +211,7 @@ export default function MapView(props: Props) {
     techumBumps,
     swallowedCities,
     partialCities,
+    bowGapRects,
     altTechumBounds,
     cityBounds,
     hull,
@@ -236,6 +250,7 @@ export default function MapView(props: Props) {
     syncRects(bumpPool.current, map, techumBumps, TECHUM_STYLE);
     syncRects(swallowedPool.current, map, swallowedCities, SWALLOWED_STYLE);
     syncRects(partialPool.current, map, partialCities, PARTIAL_CITY_STYLE);
+    syncRects(bowGapPool.current, map, bowGapRects, BOW_GAP_STYLE);
 
     // Alternate karpef-opinion techum (thin gray, no fill)
     if (!altRef.current) {
