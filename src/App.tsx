@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import KeySetup from "./components/KeySetup";
 import MapView from "./components/MapView";
 import SearchBox from "./components/SearchBox";
+import SavedLocations from "./components/SavedLocations";
 import EruvChecklist from "./components/EruvChecklist";
 import BeyondTechumNotes from "./components/BeyondTechumNotes";
 import ExplainPanel from "./components/ExplainPanel";
@@ -37,6 +38,13 @@ import {
 } from "./halacha/shiurim";
 import { loadGoogleMaps, onAuthFailure } from "./maps/loader";
 import type { SelectedPlace } from "./maps/geocode";
+import {
+  buildShareHash,
+  parseShareHash,
+  type AppSnapshot,
+  type LimitKey,
+  type Mode,
+} from "./state/share";
 
 const STORAGE_KEY = "techum.gmapsApiKey";
 const ENV_KEY = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined) || null;
@@ -47,9 +55,6 @@ const DEFAULT_KEY = "AIzaSyDtOQylrdusufl4zsRVoLr9SngVGXoUzEs";
 /** Beyond this distance from the nearest building, treat the address
  * as a lone dwelling rather than part of the detected cluster. */
 const LONE_DWELLING_CUTOFF_M = 100;
-
-type Mode = "city" | "point";
-type LimitKey = "town" | "city" | "metro";
 
 const LIMITS: Record<LimitKey, { maxBuildings: number; maxSpanM: number }> = {
   town: { maxBuildings: 60_000, maxSpanM: 12_000 },
@@ -76,10 +81,15 @@ export default function App() {
   const [mapsReady, setMapsReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [place, setPlace] = useState<SelectedPlace | null>(null);
-  const [mode, setMode] = useState<Mode>("city");
-  const [limitKey, setLimitKey] = useState<LimitKey>("city");
-  const [karpefOn, setKarpefOn] = useState(false);
+  // A shared link carries the whole view in the URL hash — restore it.
+  const [initial] = useState<AppSnapshot | null>(() =>
+    parseShareHash(window.location.hash)
+  );
+
+  const [place, setPlace] = useState<SelectedPlace | null>(initial?.place ?? null);
+  const [mode, setMode] = useState<Mode>(initial?.mode ?? "city");
+  const [limitKey, setLimitKey] = useState<LimitKey>(initial?.limit ?? "city");
+  const [karpefOn, setKarpefOn] = useState(initial?.karpef ?? false);
   const [adjusting, setAdjusting] = useState(false);
   const [manualCityBounds, setManualCityBounds] = useState<Bounds | null>(null);
   const [cityState, setCityState] = useState<CityState>({ status: "idle" });
@@ -87,11 +97,40 @@ export default function App() {
   const [retryNonce, setRetryNonce] = useState(0);
   const [showRadiusCircle, setShowRadiusCircle] = useState(false);
 
-  const [eruvOn, setEruvOn] = useState(false);
-  const [destination, setDestination] = useState<SelectedPlace | null>(null);
+  const [eruvOn, setEruvOn] = useState(!!initial?.eruv);
+  const [destination, setDestination] = useState<SelectedPlace | null>(
+    initial?.eruv?.destination ?? null
+  );
   const [eruvSpot, setEruvSpot] = useState<LatLng | null>(null);
-  const [rotationOn, setRotationOn] = useState(false);
+  const [rotationOn, setRotationOn] = useState(initial?.eruv?.rotationOn ?? false);
   const [rotationOffset, setRotationOffset] = useState(0);
+
+  // Restoring a snapshot (shared link or saved location) must survive the
+  // reset effects below, which clear the manual boundary and eiruv spot
+  // whenever the place/destination changes: the values to restore are
+  // parked here and consumed by those effects instead of resetting.
+  const pendingManualRef = useRef<Bounds | null>(initial?.manualCity ?? null);
+  const pendingEruvRef = useRef<{ spot: LatLng | null; rotationOffset: number } | null>(
+    initial?.eruv ? { spot: initial.eruv.spot, rotationOffset: initial.eruv.rotationOffset } : null
+  );
+  const [restoreNonce, setRestoreNonce] = useState(0);
+
+  const applySnapshot = (snap: AppSnapshot) => {
+    pendingManualRef.current = snap.manualCity;
+    pendingEruvRef.current = snap.eruv
+      ? { spot: snap.eruv.spot, rotationOffset: snap.eruv.rotationOffset }
+      : null;
+    setPlace(snap.place);
+    setMode(snap.mode);
+    setLimitKey(snap.limit);
+    setKarpefOn(snap.karpef);
+    setEruvOn(!!snap.eruv);
+    setDestination(snap.eruv?.destination ?? null);
+    setRotationOn(snap.eruv?.rotationOn ?? false);
+    // Forces the reset effects below to consume the pending values even
+    // when the snapshot matches the current place/destination.
+    setRestoreNonce((n) => n + 1);
+  };
 
   useEffect(() => {
     if (!apiKey) return;
@@ -104,11 +143,23 @@ export default function App() {
       .catch(() => setLoadError("Could not load Google Maps — check your connection."));
   }, [apiKey]);
 
+  // A new place/mode/limit invalidates the manual city boundary (or, when
+  // restoring a snapshot, applies the restored one). Guarded by a dep key:
+  // StrictMode re-runs the effect with identical deps, which must not
+  // consume the pending value twice.
+  const manualResetKey = useRef<string>();
+  useEffect(() => {
+    const key = JSON.stringify([place?.location, mode, limitKey, retryNonce, restoreNonce]);
+    if (manualResetKey.current === key) return;
+    manualResetKey.current = key;
+    setManualCityBounds(pendingManualRef.current);
+    pendingManualRef.current = null;
+    setAdjusting(false);
+  }, [place, mode, limitKey, retryNonce, restoreNonce]);
+
   // City analysis: fetch building footprints, expanding the analyzed
   // area until the whole contiguous city is captured or a limit is hit.
   useEffect(() => {
-    setManualCityBounds(null);
-    setAdjusting(false);
     setProgress(null);
     if (!place || mode !== "city") {
       setCityState({ status: "idle" });
@@ -147,11 +198,42 @@ export default function App() {
     };
   }, [place, mode, limitKey, retryNonce]);
 
-  // A new home/destination invalidates the chosen eiruv spot.
+  // A new home/destination invalidates the chosen eiruv spot (or, when
+  // restoring a snapshot, applies the restored one). Same StrictMode
+  // guard as the manual-boundary reset above.
+  const eruvResetKey = useRef<string>();
   useEffect(() => {
-    setEruvSpot(null);
-    setRotationOffset(0);
-  }, [place, destination, mode]);
+    const key = JSON.stringify([place?.location, destination?.location, mode, restoreNonce]);
+    if (eruvResetKey.current === key) return;
+    eruvResetKey.current = key;
+    setEruvSpot(pendingEruvRef.current?.spot ?? null);
+    setRotationOffset(pendingEruvRef.current?.rotationOffset ?? 0);
+    pendingEruvRef.current = null;
+  }, [place, destination, mode, restoreNonce]);
+
+  // Keep the URL hash in sync with the view, so the address bar is
+  // always a shareable link to exactly what is on screen.
+  const snapshot = useMemo<AppSnapshot | null>(() => {
+    if (!place) return null;
+    return {
+      v: 1,
+      place,
+      mode,
+      limit: limitKey,
+      karpef: karpefOn,
+      manualCity: manualCityBounds,
+      eruv:
+        eruvOn && destination
+          ? { destination, spot: eruvSpot, rotationOn, rotationOffset }
+          : null,
+    };
+  }, [place, mode, limitKey, karpefOn, manualCityBounds, eruvOn, destination, eruvSpot, rotationOn, rotationOffset]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    url.hash = snapshot ? buildShareHash(snapshot) : "";
+    window.history.replaceState(null, "", url);
+  }, [snapshot]);
 
   const detection =
     cityState.status === "done" &&
@@ -302,6 +384,7 @@ export default function App() {
         {loadError && <p className="error">{loadError}</p>}
         {mapsReady && <SearchBox onSelect={setPlace} />}
         {!mapsReady && !loadError && <p className="muted">Loading Google Maps…</p>}
+        <SavedLocations snapshot={snapshot} onLoad={applySnapshot} />
 
         {place && (
           <section className="info">

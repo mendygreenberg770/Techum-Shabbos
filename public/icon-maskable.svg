@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Maskable variant: full-bleed background, artwork inside the 80% safe zone. -->
+  <rect width="512" height="512" fill="#1a5fb4"/>
+  <rect x="116" y="116" width="280" height="280" rx="20" fill="none"
+        stroke="#fafafa" stroke-width="24"/>
+  <rect x="192" y="192" width="128" height="128" rx="10" fill="#e8f6ee"
+        stroke="#26a269" stroke-width="16"/>
+  <circle cx="256" cy="256" r="26" fill="#e66100"/>
+</svg>

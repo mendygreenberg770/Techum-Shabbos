@@ -1,0 +1,23 @@
+{
+  "name": "Techum Shabbos Calculator",
+  "short_name": "Techum",
+  "description": "Draws the techum Shabbos for any address on a map and helps plan an eiruv techumin. Shiurei Reb Chaim Naeh; Shulchan Aruch HaRav / Ketzos HaShulchan.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#fafafa",
+  "theme_color": "#1a5fb4",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

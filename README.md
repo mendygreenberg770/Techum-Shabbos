@@ -10,7 +10,7 @@ See [DESIGN.md](DESIGN.md) for the full design and roadmap.
 > **Disclaimer:** this tool is an aid for learning and planning only.
 > Consult a rav before relying on any boundary or eiruv it shows.
 
-## Current status (Phase 3)
+## Current status (Phase 4)
 
 - Address search (Places autocomplete, with a plain geocoder fallback)
 - **City detection with auto-expansion**: buildings are fetched from
@@ -36,6 +36,15 @@ See [DESIGN.md](DESIGN.md) for the full design and roadmap.
   within the new techum, and a checklist with the brachah and declaration
   (per Ketzos HaShulchan) is provided. Kinyan shevisa b'raglav is noted as
   the no-food alternative.
+
+- **Shareable links**: the URL hash always encodes the current view —
+  address, settings, destination, and eiruv spot — so the address bar (or
+  the "Copy shareable link" button) reproduces exactly what's on screen.
+- **Saved locations**: save the current location with all its settings to
+  the browser (localStorage) and reload it with one click.
+- **PWA / mobile**: installable (web manifest + icons), with a service
+  worker that caches the app shell for offline starts (map tiles and
+  building data still need the network).
 
 The in-app legend lists all map colors.
 
