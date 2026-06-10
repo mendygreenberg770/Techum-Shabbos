@@ -358,7 +358,10 @@ export default function App() {
           : cityBounds
         : pointBounds(place.location);
     const techum = expandBounds(base, TECHUM_M);
-    const bumps = usingCity ? computeMuvlaBumps(base, techum, otherCities) : [];
+    const bumps =
+      usingCity && cityBounds
+        ? computeMuvlaBumps(base, techum, otherCities, undefined, cityBounds)
+        : [];
     const altTechum =
       usingCity && cityBounds
         ? expandBounds(

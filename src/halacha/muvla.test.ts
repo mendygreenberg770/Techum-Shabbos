@@ -7,7 +7,7 @@ import {
   type Bounds,
   type LatLng,
 } from "./geometry";
-import { FOUR_AMOS_M, TECHUM_M } from "./shiurim";
+import { FOUR_AMOS_M, KARPEF_M, TECHUM_M } from "./shiurim";
 
 const C: LatLng = { lat: 40.7, lng: -73.95 };
 const { perDegLat, perDegLng } = metersPerDegree(C.lat);
@@ -76,6 +76,68 @@ describe("computeMuvlaBumps (ir muvla'as counts as 4 amos)", () => {
     // Overlaps home's latitude band and its longitude band → no bump.
     const city = rectM(-40, -40, 40, 40);
     expect(computeMuvlaBumps(home, techum, [city])).toHaveLength(0);
+  });
+});
+
+describe("chained ir muvla'as (each city deducts only 4 amos in sequence)", () => {
+  const home = rectM(-50, -50, 50, 50);
+  const techum = expandBounds(home, TECHUM_M);
+  // A: x 300..500; B behind it: x 700..900 (both within techum edge 1010).
+  const a = rectM(300, -40, 500, 40);
+  const b = rectM(700, -30, 900, 30);
+
+  it("credits crossing the first city when measuring to the second", () => {
+    const bumps = computeMuvlaBumps(home, techum, [a, b]);
+    expect(bumps).toHaveLength(2);
+    const bumpA = bumps.find((x) => x.city === a)!;
+    const bumpB = bumps.find((x) => x.city === b)!;
+    // A: 250 m open ground consumed.
+    expect(mLng(bumpA.bounds.east)).toBeCloseTo(500 + (TECHUM_M - 250 - FOUR_AMOS_M), 1);
+    // B through A: 250 open + 4 amos + 200 open consumed — NOT the full
+    // 650 m of raw distance.
+    const consumedB = 250 + FOUR_AMOS_M + 200;
+    expect(mLng(bumpB.bounds.east)).toBeCloseTo(
+      900 + (TECHUM_M - consumedB - FOUR_AMOS_M),
+      1
+    );
+  });
+
+  it("extends through a city swallowed only within an extension", () => {
+    // C: x 1100..1200 — beyond the plain techum (1010) but inside B's
+    // extension; swallowed there, it counts 4 amos and extends further.
+    const c = rectM(1100, -20, 1200, 20);
+    const bumps = computeMuvlaBumps(home, techum, [a, b, c]);
+    expect(bumps).toHaveLength(3);
+    const bumpC = bumps.find((x) => x.city === c)!;
+    const consumedC = 250 + FOUR_AMOS_M + 200 + FOUR_AMOS_M + 200;
+    expect(mLng(bumpC.bounds.east)).toBeCloseTo(
+      1200 + (TECHUM_M - consumedC - FOUR_AMOS_M),
+      1
+    );
+  });
+
+  it("does not chain into a city outside the corridor in front of it", () => {
+    // Beyond the plain techum and laterally outside A's span → no credit.
+    const offside = rectM(700, 60, 1100, 120);
+    const bumps = computeMuvlaBumps(home, techum, [a, offside]);
+    expect(bumps).toHaveLength(1);
+    expect(bumps[0].city).toBe(a);
+  });
+});
+
+describe("muvla with a karpef-buffered base", () => {
+  const home = rectM(-50, -50, 50, 50);
+
+  it("keeps the extension when the buffered base overlaps the city's squared bounds", () => {
+    const base = expandBounds(home, KARPEF_M); // edges at ±83.92
+    const t = expandBounds(base, TECHUM_M);
+    // The city's squared bounds start inside the karpef strip (x=80) —
+    // still east of the actual home city (edge at 50).
+    const city = rectM(80, -40, 300, 40);
+    const bumps = computeMuvlaBumps(base, t, [city], TECHUM_M, home);
+    expect(bumps).toHaveLength(1);
+    // Consumed open ground clamps at zero.
+    expect(mLng(bumps[0].bounds.east)).toBeCloseTo(300 + TECHUM_M - FOUR_AMOS_M, 1);
   });
 });
 

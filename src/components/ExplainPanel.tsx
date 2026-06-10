@@ -77,9 +77,12 @@ export default function ExplainPanel({
           <b>Neighboring towns.</b> A town that lies <i>entirely</i> within
           the techum counts as only 4 amos, and the techum extends beyond
           it (SA HaRav 408:1)
-          {bumpsCount > 0 && <> — applied to {bumpsCount} here</>}. But if
-          the 2,000 end <i>mid-town</i>, one may walk only up to the line
-          (kalsa midaso, 408:1)
+          {bumpsCount > 0 && <> — applied to {bumpsCount} here</>}. Towns
+          one behind another are counted in sequence: crossing each
+          swallowed town deducts only 4 amos, so a second town swallowed
+          within the first one's extension extends the techum further
+          still. But if the 2,000 end <i>mid-town</i>, one may walk only up
+          to the line (kalsa midaso, 408:1)
           {partialsCount > 0 && <> — the red-outlined towns here</>}.
         </li>
         {eruvOn && (
