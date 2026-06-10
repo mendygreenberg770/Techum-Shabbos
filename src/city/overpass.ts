@@ -20,6 +20,7 @@ interface OverpassElement {
   type: string;
   id: number;
   bounds?: { minlat: number; minlon: number; maxlat: number; maxlon: number };
+  geometry?: { lat: number; lon: number }[];
 }
 
 export interface FetchedBuilding {
@@ -59,7 +60,7 @@ async function fetchFromEndpoint(
   endpoint: string,
   query: string,
   signal?: AbortSignal
-): Promise<FetchedBuilding[]> {
+): Promise<OverpassElement[]> {
   const res = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -83,20 +84,27 @@ async function fetchFromEndpoint(
   if (!Array.isArray(data.elements)) {
     throw new Error("Overpass: malformed response");
   }
-  return data.elements
-    .filter((el) => el.type === "way" && el.bounds)
-    .map((el) => {
-      const b = el.bounds!;
-      return {
-        id: el.id,
-        ring: [
-          { lat: b.minlat, lng: b.minlon },
-          { lat: b.minlat, lng: b.maxlon },
-          { lat: b.maxlat, lng: b.maxlon },
-          { lat: b.maxlat, lng: b.minlon },
-        ],
-      };
-    });
+  return data.elements;
+}
+
+/** Run a query against the endpoint pool with failover and retry. */
+async function runQuery(query: string, signal?: AbortSignal): Promise<OverpassElement[]> {
+  let lastError: Error = new Error("No Overpass endpoint available");
+  for (let pass = 0; pass < RETRY_PASSES; pass++) {
+    if (pass > 0) await delay(RETRY_DELAY_MS * pass, signal);
+    for (let k = 0; k < ENDPOINTS.length; k++) {
+      const idx = (preferred + k) % ENDPOINTS.length;
+      try {
+        const result = await fetchFromEndpoint(ENDPOINTS[idx], query, signal);
+        preferred = idx;
+        return result;
+      } catch (e) {
+        if (signal?.aborted) throw e;
+        lastError = e instanceof Error ? e : new Error(String(e));
+      }
+    }
+  }
+  throw lastError;
 }
 
 /**
@@ -117,21 +125,48 @@ export async function fetchBuildingsInRect(
 ): Promise<FetchedBuilding[]> {
   const bbox = `${rect.south},${rect.west},${rect.north},${rect.east}`;
   const query = `[out:json][timeout:60];way[building](${bbox});out ids bb qt;`;
+  const elements = await runQuery(query, signal);
+  return elements
+    .filter((el) => el.type === "way" && el.bounds)
+    .map((el) => {
+      const b = el.bounds!;
+      return {
+        id: el.id,
+        ring: [
+          { lat: b.minlat, lng: b.minlon },
+          { lat: b.minlat, lng: b.maxlon },
+          { lat: b.maxlat, lng: b.maxlon },
+          { lat: b.maxlat, lng: b.minlon },
+        ],
+      };
+    });
+}
 
-  let lastError: Error = new Error("No Overpass endpoint available");
-  for (let pass = 0; pass < RETRY_PASSES; pass++) {
-    if (pass > 0) await delay(RETRY_DELAY_MS * pass, signal);
-    for (let k = 0; k < ENDPOINTS.length; k++) {
-      const idx = (preferred + k) % ENDPOINTS.length;
-      try {
-        const result = await fetchFromEndpoint(ENDPOINTS[idx], query, signal);
-        preferred = idx;
-        return result;
-      } catch (e) {
-        if (signal?.aborted) throw e;
-        lastError = e instanceof Error ? e : new Error(String(e));
-      }
-    }
-  }
-  throw lastError;
+/**
+ * Fallback for regions where OSM has no individual building footprints
+ * (common in parts of the US): fetch settled-area outlines
+ * (landuse=residential/commercial/retail) instead. These are coarse,
+ * hand-drawn outlines of built-up blocks — usable as an *estimate* of
+ * the city extent, flagged as such in the UI for manual review.
+ *
+ * Full polygon geometry is fetched (`out geom`): area polygons are few
+ * but large, and their bounding boxes would badly overstate the city
+ * (a kula) — the exact outlines keep the clustering honest.
+ */
+export async function fetchSettledAreasInRect(
+  rect: Bounds,
+  signal?: AbortSignal
+): Promise<FetchedBuilding[]> {
+  const bbox = `${rect.south},${rect.west},${rect.north},${rect.east}`;
+  const query = `[out:json][timeout:60];way[landuse~"^(residential|commercial|retail)$"](${bbox});out geom qt;`;
+  const elements = await runQuery(query, signal);
+  return elements
+    .filter((el) => el.type === "way" && (el.geometry?.length ?? 0) >= 3)
+    .map((el) => {
+      const pts = el.geometry!.map((g) => ({ lat: g.lat, lng: g.lon }));
+      // Closed ways repeat the first node at the end — drop the duplicate.
+      const last = pts[pts.length - 1];
+      if (last.lat === pts[0].lat && last.lng === pts[0].lng) pts.pop();
+      return { id: el.id, ring: pts };
+    });
 }

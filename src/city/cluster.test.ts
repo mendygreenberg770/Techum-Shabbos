@@ -81,6 +81,19 @@ describe("detectCity: two-cities joining (141 1/3 amos = 67.84 m)", () => {
     const det = detectCity(C, [rect(0, 0), rect(20, 0), rect(85, 0)], area(2000))!;
     expect(det.clusterSize).toBe(2);
   });
+
+  it("with minCitySize 1 (settled-area mode), lone polygons join at city distance", () => {
+    // Each settled-area outline already represents many dwellings, so
+    // two of them 55 m apart (spans -5..5 and 60..70) join across the
+    // two-karpef distance.
+    const det = detectCity(C, [rect(0, 0), rect(65, 0)], area(2000), 1)!;
+    expect(det.clusterSize).toBe(2);
+  });
+
+  it("with minCitySize 1, a lone polygon counts among other cities", () => {
+    const det = detectCity(C, [rect(0, 0), rect(500, 0)], area(2000), 1)!;
+    expect(det.otherCities).toHaveLength(1);
+  });
 });
 
 describe("detectCity: locating the user and the city bounds", () => {

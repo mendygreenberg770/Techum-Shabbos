@@ -20,6 +20,12 @@ See [DESIGN.md](DESIGN.md) for the full design and roadmap.
   **grows automatically** until the entire contiguous city is captured, or
   a selectable limit (Town / Large city / Metropolis) is hit — in which
   case the app warns explicitly on which sides the city continues.
+- **Data fallbacks where OSM is sparse**: in regions with no individual
+  building footprints mapped (common in parts of the US), the city is
+  estimated from OSM **settled-area outlines** (landuse =
+  residential/commercial/retail), clearly flagged for review; where even
+  those are missing, you can **draw the city boundary manually** on the
+  satellite view.
 - The city is squared as a north-aligned rectangle (ribua ha'olam) and the
   techum extends 2,000 amos (960 m) from its edge, corners included.
 - **Ir muvla'as (SA HaRav 408:1)**: a neighboring city fully swallowed

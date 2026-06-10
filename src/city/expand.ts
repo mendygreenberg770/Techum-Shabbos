@@ -1,5 +1,5 @@
 import { detectCity, type CityDetection, type Side } from "./cluster";
-import { fetchBuildingsInRect } from "./overpass";
+import { fetchBuildingsInRect, fetchSettledAreasInRect } from "./overpass";
 import {
   expandBounds,
   metersPerDegree,
@@ -38,19 +38,27 @@ const INITIAL_HALF_M = 1200;
 const STEP_M = 1600;
 const MAX_ITERATIONS = 60;
 
+/** What the city outline is built from: individual building footprints,
+ * or settled-area (landuse) outlines as a coarser fallback where OSM has
+ * no buildings mapped. */
+export type CitySource = "buildings" | "areas";
+
 export async function detectCityExpanding(
   center: LatLng,
   limits: ExpandLimits,
   onProgress?: (p: ExpandProgress) => void,
   isCancelled?: () => boolean,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  source: CitySource = "buildings"
 ): Promise<ExpandResult> {
   const { perDegLat, perDegLng } = metersPerDegree(center.lat);
   let rect = expandBounds(pointBounds(center), INITIAL_HALF_M);
   const byId = new Map<number, LatLng[]>();
+  const fetcher = source === "areas" ? fetchSettledAreasInRect : fetchBuildingsInRect;
+  const minCitySize = source === "areas" ? 1 : undefined;
 
   const fetchInto = async (r: Bounds) => {
-    for (const b of await fetchBuildingsInRect(r, signal)) {
+    for (const b of await fetcher(r, signal)) {
       byId.set(b.id, b.ring);
     }
   };
@@ -59,7 +67,7 @@ export async function detectCityExpanding(
   await fetchInto(rect);
   let detection: CityDetection | null = null;
   for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
-    detection = detectCity(center, [...byId.values()], rect);
+    detection = detectCity(center, [...byId.values()], rect, minCitySize);
     const sides = detection?.truncatedSides ?? [];
     if (!detection || sides.length === 0 || isCancelled?.()) {
       return { detection, fetchedRect: rect, capped: isCancelled?.() ?? false };
@@ -116,4 +124,29 @@ export async function detectCityExpanding(
     }
   }
   return { detection, fetchedRect: rect, capped: true };
+}
+
+export interface AutoDetectResult extends ExpandResult {
+  source: CitySource;
+}
+
+/**
+ * Detect the city from building footprints; where OSM has none mapped
+ * around the point (common in parts of the US), fall back to settled-area
+ * outlines (landuse polygons) as a coarser estimate. The caller flags
+ * area-based results for manual review.
+ */
+export async function detectCityAuto(
+  center: LatLng,
+  limits: ExpandLimits,
+  onProgress?: (p: ExpandProgress) => void,
+  isCancelled?: () => boolean,
+  signal?: AbortSignal
+): Promise<AutoDetectResult> {
+  const buildings = await detectCityExpanding(center, limits, onProgress, isCancelled, signal);
+  if (buildings.detection || isCancelled?.() || signal?.aborted) {
+    return { ...buildings, source: "buildings" };
+  }
+  const areas = await detectCityExpanding(center, limits, onProgress, isCancelled, signal, "areas");
+  return { ...areas, source: "areas" };
 }

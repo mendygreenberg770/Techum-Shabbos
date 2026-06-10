@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchBuildingsInRect } from "./overpass";
+import { fetchBuildingsInRect, fetchSettledAreasInRect } from "./overpass";
 
 const rect = { north: 40.67, south: 40.66, east: -73.94, west: -73.95 };
 
@@ -76,6 +76,40 @@ describe("fetchBuildingsInRect", () => {
     await assertion;
     // 2 passes over 3 endpoints
     expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  it("parses settled-area polygons, dropping the closing node", async () => {
+    const way = {
+      type: "way",
+      id: 11,
+      geometry: [
+        { lat: 40.66, lon: -73.95 },
+        { lat: 40.66, lon: -73.94 },
+        { lat: 40.67, lon: -73.94 },
+        { lat: 40.66, lon: -73.95 },
+      ],
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => okJson({ elements: [way] })));
+    const result = await fetchSettledAreasInRect(rect);
+    expect(result).toHaveLength(1);
+    expect(result[0].ring).toHaveLength(3);
+    expect(result[0].ring[0]).toEqual({ lat: 40.66, lng: -73.95 });
+  });
+
+  it("queries landuse for settled areas and building for buildings", async () => {
+    const bodies: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+        bodies.push(String(init?.body));
+        return okJson({ elements: [] });
+      })
+    );
+    await fetchBuildingsInRect(rect);
+    await fetchSettledAreasInRect(rect);
+    expect(decodeURIComponent(bodies[0])).toContain("way[building]");
+    expect(decodeURIComponent(bodies[1])).toContain("landuse");
+    expect(decodeURIComponent(bodies[1])).toContain("residential");
   });
 
   it("stops immediately when aborted", async () => {

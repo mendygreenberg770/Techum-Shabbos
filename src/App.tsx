@@ -7,7 +7,7 @@ import EruvChecklist from "./components/EruvChecklist";
 import BeyondTechumNotes from "./components/BeyondTechumNotes";
 import ExplainPanel from "./components/ExplainPanel";
 import type { CityDetection } from "./city/cluster";
-import { detectCityExpanding, type ExpandProgress } from "./city/expand";
+import { detectCityAuto, type CitySource, type ExpandProgress } from "./city/expand";
 import {
   bearingDeg,
   diamondContains,
@@ -69,12 +69,16 @@ interface CityState {
   error?: string;
   /** Building data stopped loading partway — result may be incomplete. */
   fetchError?: string;
+  /** What the outline was built from (settled-area outlines are a
+   * coarser fallback where OSM has no buildings mapped). */
+  source?: CitySource;
 }
 
 interface EruvCityState {
   status: "idle" | "loading" | "done" | "error";
   detection?: CityDetection;
   error?: string;
+  source?: CitySource;
 }
 
 /** A cluster must have at least this many buildings to count as a town
@@ -185,7 +189,7 @@ export default function App() {
     // get subsequent requests rate-limited.
     const controller = new AbortController();
     setCityState({ status: "loading" });
-    detectCityExpanding(
+    detectCityAuto(
       place.location,
       LIMITS[limitKey],
       (p) => {
@@ -201,6 +205,7 @@ export default function App() {
           detection: result.detection ?? undefined,
           capped: result.capped,
           fetchError: result.fetchError,
+          source: result.source,
         });
         setProgress(null);
       })
@@ -246,7 +251,7 @@ export default function App() {
     const controller = new AbortController();
     setEruvCityState({ status: "loading" });
     const timer = window.setTimeout(() => {
-      detectCityExpanding(
+      detectCityAuto(
         eruvSpot,
         LIMITS[limitKey],
         undefined,
@@ -255,7 +260,11 @@ export default function App() {
       )
         .then((result) => {
           if (!cancelled) {
-            setEruvCityState({ status: "done", detection: result.detection ?? undefined });
+            setEruvCityState({
+              status: "done",
+              detection: result.detection ?? undefined,
+              source: result.source,
+            });
           }
         })
         .catch((e) => {
@@ -540,7 +549,20 @@ export default function App() {
                       onClick={() => setRetryNonce((n) => n + 1)}
                     >
                       Retry
-                    </button>
+                    </button>{" "}
+                    {!manualCityBounds && (
+                      <button
+                        className="link-button"
+                        onClick={() => {
+                          setManualCityBounds(
+                            expandBounds(pointBounds(place.location), 300)
+                          );
+                          setAdjusting(true);
+                        }}
+                      >
+                        Draw the boundary manually
+                      </button>
+                    )}
                   </p>
                 )}
                 {cityState.status === "done" && cityState.fetchError && (
@@ -556,25 +578,62 @@ export default function App() {
                     </button>
                   </p>
                 )}
-                {noCityFound && cityState.status === "done" && (
+                {noCityFound && cityState.status === "done" && !manualCityBounds && (
+                  <div className="warning">
+                    ⚠ Neither buildings nor residential-area outlines are
+                    mapped in OpenStreetMap near this address, so the city
+                    could not be detected — showing the stringent
+                    point-based techum instead. You can draw the city
+                    boundary yourself on the map (use the satellite view to
+                    trace the built-up edge), or retry the data fetch.
+                    <div className="saved-actions" style={{ marginTop: 8 }}>
+                      <button
+                        className="mini-button"
+                        onClick={() => {
+                          setManualCityBounds(
+                            expandBounds(pointBounds(place.location), 300)
+                          );
+                          setAdjusting(true);
+                        }}
+                      >
+                        ✏ Draw the city boundary manually
+                      </button>
+                      <button
+                        className="mini-button"
+                        onClick={() => setRetryNonce((n) => n + 1)}
+                      >
+                        ↻ Retry
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {detection && cityState.source === "areas" && (
                   <p className="warning">
-                    ⚠ No buildings were found near this address in
-                    OpenStreetMap — showing the point-based techum of a
-                    lone dwelling instead.{" "}
-                    <button
-                      className="link-button"
-                      onClick={() => setRetryNonce((n) => n + 1)}
-                    >
-                      Retry
-                    </button>
+                    ⚠ No individual buildings are mapped in OpenStreetMap
+                    around this address. The city boundary was{" "}
+                    <b>estimated from OSM residential/commercial area
+                    outlines</b> — a coarser basis than building footprints.
+                    Check it against the satellite imagery (adjust the
+                    rectangle manually if it's off) and confirm with a rav.
                   </p>
                 )}
                 {detection && (
                   <p className="muted">
-                    City cluster: {detection.clusterSize.toLocaleString()} of{" "}
-                    {detection.totalBuildings.toLocaleString()} buildings
-                    analyzed join the city (gap ≤ 70⅔ amos between buildings,
-                    ≤ 141⅓ amos between cities).
+                    {cityState.source === "areas" ? (
+                      <>
+                        City estimate: {detection.clusterSize.toLocaleString()}{" "}
+                        of {detection.totalBuildings.toLocaleString()} mapped
+                        settled-area outlines join the city (gap ≤ 70⅔ amos,
+                        cities join within 141⅓ amos).
+                      </>
+                    ) : (
+                      <>
+                        City cluster: {detection.clusterSize.toLocaleString()}{" "}
+                        of {detection.totalBuildings.toLocaleString()}{" "}
+                        buildings analyzed join the city (gap ≤ 70⅔ amos
+                        between buildings, ≤ 141⅓ amos between cities).
+                      </>
+                    )}
                     {truncated.length === 0 &&
                       " The entire contiguous city was captured."}
                   </p>
@@ -836,6 +895,19 @@ export default function App() {
                             </button>
                           </p>
                         )}
+                        {eruvSpot &&
+                          !rotationOn &&
+                          eruvCityState.status === "done" &&
+                          eruvCityState.source === "areas" &&
+                          eruvCityState.detection && (
+                            <p className="warning">
+                              ⚠ Towns around the eiruv spot were estimated
+                              from OSM settled-area outlines (no individual
+                              buildings are mapped there) — verify against
+                              the satellite imagery before relying on the
+                              host-town extension.
+                            </p>
+                          )}
                         {eruvSpot && (rotationOn || eruvCityResolved) && (
                           <>
                             {!spotOk && (

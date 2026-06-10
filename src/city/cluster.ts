@@ -253,7 +253,11 @@ class UnionFind {
 export function detectCity(
   center: LatLng,
   buildingPolys: LatLng[][],
-  fetchedRect: Bounds
+  fetchedRect: Bounds,
+  /** Buildings needed for "city" status (the two-karpef joining rule and
+   * the muvla list). Pass 1 for settled-area polygons, each of which
+   * already represents many dwellings. */
+  minCitySize: number = MIN_CITY_SIZE
 ): CityDetection | null {
   if (buildingPolys.length === 0) return null;
 
@@ -343,7 +347,7 @@ export function detectCity(
     for (const [i, j] of cityEdges) {
       const ri = uf.find(i);
       const rj = uf.find(j);
-      if (ri !== rj && uf.size[ri] >= MIN_CITY_SIZE && uf.size[rj] >= MIN_CITY_SIZE) {
+      if (ri !== rj && uf.size[ri] >= minCitySize && uf.size[rj] >= minCitySize) {
         uf.union(i, j);
         changed = true;
       }
@@ -396,7 +400,7 @@ export function detectCity(
   const reach = expandBounds(bounds, TECHUM_M + KARPEF_M + 100);
   const otherCities: Bounds[] = [];
   for (const [r, cb] of clusterBounds) {
-    if (r === root || cb.count < MIN_CITY_SIZE) continue;
+    if (r === root || cb.count < minCitySize) continue;
     const b: Bounds = { north: cb.north, south: cb.south, east: cb.east, west: cb.west };
     if (rectIntersect(reach, b)) otherCities.push(b);
   }
