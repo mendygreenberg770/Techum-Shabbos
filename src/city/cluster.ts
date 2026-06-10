@@ -53,6 +53,13 @@ export interface CityDetection {
    */
   otherCities: Bounds[];
   /**
+   * Sides where one of those neighboring cities reaches the edge of the
+   * analyzed area: its true extent continues beyond what was fetched, so
+   * its squared bounds (and any muvla extension) would be clipped
+   * mid-town. The analysis keeps expanding until these are empty too.
+   */
+  neighborTruncatedSides: Side[];
+  /**
    * Bow-shaped city flag (Mishnah Eruvin 55a; Nesivos Shabbos 42:17):
    * open area inside the squared city may be "filled in"
    * only when the built ends flanking it are within 4,000 amos
@@ -402,25 +409,35 @@ export function detectCity(
   // for the ir muvla'as computation.
   const reach = expandBounds(bounds, TECHUM_M + KARPEF_M + 100);
   const otherCities: Bounds[] = [];
+  const otherRoots = new Set<number>();
   for (const [r, cb] of clusterBounds) {
     if (r === root || cb.count < minCitySize) continue;
     const b: Bounds = { north: cb.north, south: cb.south, east: cb.east, west: cb.west };
-    if (rectIntersect(reach, b)) otherCities.push(b);
+    if (rectIntersect(reach, b)) {
+      otherCities.push(b);
+      otherRoots.add(r);
+    }
   }
 
   // The user's cluster: hull and truncation against the analyzed area.
+  // Relevant neighbor clusters are checked for truncation too — a town
+  // clipped by the fetch edge would otherwise be squared mid-town.
   const clusterVerts: Vertex[] = [];
   const truncated = new Set<Side>();
+  const neighborTruncated = new Set<Side>();
   const marginLat = (TWO_CITIES_JOIN_M + 5) / perDegLat;
   const marginLng = (TWO_CITIES_JOIN_M + 5) / perDegLng;
   for (let i = 0; i < N; i++) {
-    if (uf.find(i) !== root) continue;
+    const r = uf.find(i);
+    const target =
+      r === root ? truncated : otherRoots.has(r) ? neighborTruncated : null;
+    if (!target) continue;
     for (const v of buildings[i].verts) {
-      clusterVerts.push(v);
-      if (v.lat >= fetchedRect.north - marginLat) truncated.add("north");
-      if (v.lat <= fetchedRect.south + marginLat) truncated.add("south");
-      if (v.lng >= fetchedRect.east - marginLng) truncated.add("east");
-      if (v.lng <= fetchedRect.west + marginLng) truncated.add("west");
+      if (r === root) clusterVerts.push(v);
+      if (v.lat >= fetchedRect.north - marginLat) target.add("north");
+      if (v.lat <= fetchedRect.south + marginLat) target.add("south");
+      if (v.lng >= fetchedRect.east - marginLng) target.add("east");
+      if (v.lng <= fetchedRect.west + marginLng) target.add("west");
     }
   }
 
@@ -433,6 +450,7 @@ export function detectCity(
     totalBuildings: N,
     nearestBuildingM: nearestDist,
     truncatedSides: [...truncated],
+    neighborTruncatedSides: [...neighborTruncated],
     otherCities,
     bowGapM: bow?.maxGapM ?? null,
     bowGapRects: bow?.rects ?? [],

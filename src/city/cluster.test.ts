@@ -198,5 +198,20 @@ describe("detectCity: truncation at the edge of the analyzed area", () => {
   it("flags nothing when the city is well inside the analyzed area", () => {
     const det = detectCity(C, [rect(0, 0), rect(40, 0)], area(2000))!;
     expect(det.truncatedSides).toEqual([]);
+    expect(det.neighborTruncatedSides).toEqual([]);
+  });
+
+  it("flags a neighboring town cut off by the analyzed area's edge", () => {
+    // Home in the middle; a 2-building neighbor town near the east edge
+    // of the fetched area: its true extent likely continues beyond, so
+    // the analysis must keep expanding rather than square it mid-town.
+    const det = detectCity(
+      C,
+      [rect(0, 0), rect(30, 0), rect(700, 0), rect(740, 0)],
+      area(800)
+    )!;
+    expect(det.truncatedSides).toEqual([]);
+    expect(det.otherCities).toHaveLength(1);
+    expect(det.neighborTruncatedSides).toContain("east");
   });
 });

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { detectCityAuto } from "./expand";
 import { clearOverpassCache } from "./overpass";
 import { clearArcgisCache } from "./arcgis";
+import { metersPerDegree } from "../halacha/geometry";
 
 // Synthetic spot; buildings are placed within the initial analysis
 // rectangle and far from its edges so the expansion finishes in one round.
@@ -108,6 +109,36 @@ describe("detectCityAuto: union of OSM and ArcGIS buildings", () => {
       expect(r.merged).toBe(true);
       expect(r.detection!.totalBuildings).toBe(3);
       expect(r.detection!.clusterSize).toBe(3);
+    });
+  });
+
+  it("expands further until a clipped neighboring town is fully captured", () => {
+    // Home pair at the center; a neighbor pair ~1,100 m east — inside
+    // the muvla reach but within the truncation margin of the initial
+    // ±1,200 m fetch area. The analysis must expand once more so the
+    // neighbor isn't squared mid-town.
+    const { perDegLng } = metersPerDegree(C.lat);
+    const d1 = 1100 / perDegLng;
+    const d2 = 1130 / perDegLng;
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) =>
+      isArcgis(url)
+        ? okJson({ features: [] })
+        : okJson({
+            elements: [
+              osmWay(1, 0, 0),
+              osmWay(2, 0, 0.0003),
+              osmWay(3, 0, d1),
+              osmWay(4, 0, d2),
+            ],
+          })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return detectCityAuto(C, LIMITS).then((r) => {
+      expect(r.capped).toBe(false);
+      expect(r.detection!.otherCities).toHaveLength(1);
+      expect(r.detection!.neighborTruncatedSides).toEqual([]);
+      // Initial round (OSM + ArcGIS) plus at least one strip round.
+      expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(3);
     });
   });
 

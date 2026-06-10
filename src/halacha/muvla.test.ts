@@ -156,9 +156,14 @@ describe("several muvla towns at once (field report regression)", () => {
     expect(bumps.map((b) => b.city)).toEqual(
       expect.arrayContaining([big, smallNearEdge, smallDeep])
     );
-    for (const b of bumps) {
-      const depth = mLng(b.city.east) - mLng(b.city.west);
-      expect(mLng(b.bounds.east)).toBeCloseTo(TECHUM_M + 50 + depth - FOUR_AMOS_M, 1);
+    // Every town extends by at least (its depth − 4 amos) past the base
+    // line — chain credits can only push segments further, never less.
+    for (const city of [big, smallNearEdge, smallDeep]) {
+      const fars = bumps
+        .filter((b) => b.city === city)
+        .map((b) => mLng(b.bounds.east));
+      const depth = mLng(city.east) - mLng(city.west);
+      expect(Math.min(...fars)).toBeCloseTo(TECHUM_M + 50 + depth - FOUR_AMOS_M, 1);
     }
   });
 
@@ -169,12 +174,53 @@ describe("several muvla towns at once (field report regression)", () => {
     const big = rectM(400, -300, 900, 200);
     const smallInside = rectM(150, -100, 210, -40); // corridor ⊂ big's
     const bumps = computeMuvlaBumps(home, techum, [big, smallInside]);
-    const bigBump = bumps.find((b) => b.city === big)!;
     const smallBump = bumps.find((b) => b.city === smallInside)!;
     expect(smallBump).toBeDefined();
-    expect(mLng(smallBump.bounds.east)).toBeLessThan(mLng(bigBump.bounds.east));
-    expect(smallBump.bounds.north).toBeLessThanOrEqual(bigBump.bounds.north);
-    expect(smallBump.bounds.south).toBeGreaterThanOrEqual(bigBump.bounds.south);
+    // Some segment of the big town's extension fully contains it.
+    const containing = bumps.filter(
+      (b) =>
+        b.city === big &&
+        mLng(b.bounds.east) > mLng(smallBump.bounds.east) &&
+        b.bounds.north >= smallBump.bounds.north - 1e-9 &&
+        b.bounds.south <= smallBump.bounds.south + 1e-9
+    );
+    expect(containing.length).toBeGreaterThan(0);
+  });
+
+  it("credits a wider back town across the overlap strip (piecewise)", () => {
+    // Narrow town S in front (corridor −20..20); wide town B behind
+    // (corridor −200..200), both fully swallowed. In S's strip the
+    // measure to B crosses S for 4 amos, so B's extension is DEEPER
+    // there than in the rest of its width — the line is measured "after
+    // the additional line", not flattened back to the base accounting.
+    const s = rectM(300, -20, 380, 20); // 80 m deep
+    const b = rectM(600, -200, 900, 200); // 300 m deep
+    const bumps = computeMuvlaBumps(home, techum, [s, b]);
+    const bBumps = bumps.filter((x) => x.city === b);
+    expect(bBumps.length).toBe(3); // side, overlap, side
+
+    const directFar = 900 + (TECHUM_M - 550 - FOUR_AMOS_M);
+    const chainedConsumed = 250 + FOUR_AMOS_M + (600 - 380);
+    const chainedFar = 900 + (TECHUM_M - chainedConsumed - FOUR_AMOS_M);
+    const overlap = bBumps.find((x) => Math.abs(mLat(x.bounds.north) - 20) < 1);
+    expect(overlap).toBeDefined();
+    expect(mLng(overlap!.bounds.east)).toBeCloseTo(chainedFar, 1);
+    expect(mLat(overlap!.bounds.south)).toBeCloseTo(-20, 1);
+    for (const x of bBumps.filter((x) => x !== overlap)) {
+      expect(mLng(x.bounds.east)).toBeCloseTo(directFar, 1);
+    }
+    expect(chainedFar).toBeGreaterThan(directFar);
+  });
+
+  it("does not credit a town poking past the base line with only partial lateral cover", () => {
+    // S narrow in front; B straddles the base techum edge and is wider
+    // than S's corridor: the uncovered slices stick out of the reachable
+    // area, so B is kalsa midaso — no extension at all.
+    const s = rectM(300, -20, 380, 20);
+    const b = rectM(700, -200, 1080, 200); // past edge at 1010, within S's reach
+    const bumps = computeMuvlaBumps(home, techum, [s, b]);
+    expect(bumps.filter((x) => x.city === b)).toHaveLength(0);
+    expect(kalsaCities(techum, bumps, [b])).toEqual([b]);
   });
 });
 

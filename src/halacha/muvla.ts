@@ -8,18 +8,18 @@ import { metersPerDegree, rectIntersect, type Bounds } from "./geometry";
  * measure consumed is the open distance up to the city plus 4 amos for
  * the whole city, and the remainder continues past its far edge.
  *
- * Chains are accounted sequentially: when a second city sits behind a
- * swallowed one (within its corridor), the measure to it crosses the
- * first for only 4 amos — and a city swallowed entirely within such an
- * extension is itself muvla'as, extending further, each deducting its
- * own 4 amos.
+ * Chains are accounted sequentially and PIECEWISE: when a second city
+ * sits behind a swallowed one, the measure to it crosses the first for
+ * only 4 amos in the strip where their corridors overlap laterally — a
+ * back city wider than the front one is credited in the overlap strip
+ * and measured across open ground elsewhere, so one city can produce
+ * extensions of different depths side by side. A city swallowed
+ * entirely within such extensions is itself muvla'as, extending
+ * further, each crossing deducting its own 4 amos.
  *
  * Working simplifications (flagged in the UI / DESIGN.md):
  *  - The extension's lateral extent is the swallowed city's own squared
  *    width (no further squaring of the bump).
- *  - A chained city must lie laterally within the corridor of the city
- *    in front of it (its full span inside the bump's span); otherwise
- *    only open-ground measure applies (a stringency).
  *  - Distances are measured along the cardinal axis, consistent with
  *    the square (ribua) model of the techum.
  */
@@ -226,38 +226,100 @@ export function computeMuvlaBumps(
       .sort((a, b) => a.lo - b.lo);
 
     for (const c of cands) {
-      // Cheapest measure that reaches c with c fully swallowed:
+      // All measures that reach c with c swallowed along the way:
       // directly across open ground (when c fits inside the base
-      // techum), or through an already-swallowed city in front of it
-      // (4 amos for the crossing), whichever consumes less.
-      let consumed = Infinity;
+      // techum), and through each already-swallowed city in front of it
+      // (4 amos for the crossing) over their LATERAL OVERLAP — a back
+      // town wider than the front one is still credited in the strip
+      // where the measuring line crosses both.
+      interface Option {
+        consumed: number;
+        pLo: number;
+        pHi: number;
+      }
+      const options: Option[] = [];
       if (c.hi <= v.techumEdge + EPS_M) {
-        consumed = Math.max(0, c.lo - v.baseEdge);
+        options.push({
+          consumed: Math.max(0, c.lo - v.baseEdge),
+          pLo: c.pLo,
+          pHi: c.pHi,
+        });
       }
       for (const n of nodes) {
-        if (
-          c.pLo >= n.pLo - EPS_M &&
-          c.pHi <= n.pHi + EPS_M &&
-          c.lo >= n.cityHi - EPS_M &&
-          c.hi <= n.far + EPS_M
-        ) {
-          consumed = Math.min(consumed, n.through + Math.max(0, c.lo - n.cityHi));
+        if (c.lo < n.cityHi - EPS_M || c.hi > n.far + EPS_M) continue;
+        const oLo = Math.max(c.pLo, n.pLo);
+        const oHi = Math.min(c.pHi, n.pHi);
+        if (oHi - oLo <= EPS_M) continue;
+        options.push({
+          consumed: n.through + Math.max(0, c.lo - n.cityHi),
+          pLo: oLo,
+          pHi: oHi,
+        });
+      }
+      if (options.length === 0) continue; // not swallowed (kalsa midaso)
+
+      // Muvla'as requires the WHOLE city within the reachable area: when
+      // it pokes past the base techum, every lateral slice of it must be
+      // covered by some qualifying corridor.
+      if (c.hi > v.techumEdge + EPS_M) {
+        const covered = options
+          .map((o) => ({ lo: o.pLo, hi: o.pHi }))
+          .sort((a, b) => a.lo - b.lo);
+        let reach = c.pLo;
+        for (const seg of covered) {
+          if (seg.lo > reach + EPS_M) break;
+          reach = Math.max(reach, seg.hi);
+        }
+        if (reach < c.pHi - EPS_M) continue; // partially out — kalsa
+      }
+
+      // Piecewise: across each elementary lateral strip, the cheapest
+      // covering measure wins; adjacent strips with the same measure
+      // merge back into one rectangle.
+      const cuts = [...new Set(options.flatMap((o) => [o.pLo, o.pHi]))].sort(
+        (a, b) => a - b
+      );
+      let prev: { lo: number; hi: number; consumed: number } | null = null;
+      const segments: { lo: number; hi: number; consumed: number }[] = [];
+      for (let i = 0; i + 1 < cuts.length; i++) {
+        const lo = cuts[i];
+        const hi = cuts[i + 1];
+        if (hi - lo <= EPS_M) continue;
+        let consumed = Infinity;
+        for (const o of options) {
+          if (o.pLo <= lo + EPS_M && o.pHi >= hi - EPS_M) {
+            consumed = Math.min(consumed, o.consumed);
+          }
+        }
+        if (!isFinite(consumed)) continue;
+        if (prev && Math.abs(prev.consumed - consumed) < EPS_M && Math.abs(prev.hi - lo) < EPS_M) {
+          prev.hi = hi;
+        } else {
+          prev = { lo, hi, consumed };
+          segments.push(prev);
         }
       }
-      if (!isFinite(consumed)) continue; // not fully swallowed (kalsa midaso)
 
-      const remaining = techumMeters - consumed - FOUR_AMOS_M;
-      if (remaining <= 0) continue;
-      const far = c.hi + remaining;
-      // Recorded even when the extension stays inside the base techum:
-      // crossing this city still costs only 4 amos for the next one.
-      nodes.push({ cityHi: c.hi, pLo: c.pLo, pHi: c.pHi, far, through: consumed + FOUR_AMOS_M });
-      if (far > v.techumEdge + EPS_M) {
-        bumps.push({
-          side: v.side,
-          city: c.src,
-          bounds: v.toBounds(v.techumEdge, far, c.pLo, c.pHi),
+      for (const seg of segments) {
+        const remaining = techumMeters - seg.consumed - FOUR_AMOS_M;
+        if (remaining <= 0) continue;
+        const far = c.hi + remaining;
+        // Recorded even when the extension stays inside the base techum:
+        // crossing this city still costs only 4 amos for the next one.
+        nodes.push({
+          cityHi: c.hi,
+          pLo: seg.lo,
+          pHi: seg.hi,
+          far,
+          through: seg.consumed + FOUR_AMOS_M,
         });
+        if (far > v.techumEdge + EPS_M) {
+          bumps.push({
+            side: v.side,
+            city: c.src,
+            bounds: v.toBounds(v.techumEdge, far, seg.lo, seg.hi),
+          });
+        }
       }
     }
   }

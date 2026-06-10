@@ -726,6 +726,15 @@ export default function App() {
                       " The entire contiguous city was captured."}
                   </p>
                 )}
+                {detection && detection.neighborTruncatedSides.length > 0 && (
+                  <p className="warning">
+                    ⚠ A neighboring town at the{" "}
+                    <b>{detection.neighborTruncatedSides.join(", ")}</b> edge
+                    of the analyzed area was cut off mid-town — its boundary
+                    (and any 4-amos extension from it) may be understated.
+                    Raise the analysis limit (slower) to capture it fully.
+                  </p>
+                )}
                 {detection && cityState.capped && truncated.length === 0 && (
                   <p className="warning">
                     ⚠ The analysis stopped at the selected limit before

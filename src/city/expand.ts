@@ -214,7 +214,12 @@ export async function detectCityExpanding(
   let detection: CityDetection | null = null;
   for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     detection = detectCity(center, [...byId.values()], rect, minCitySize);
-    const sides = detection?.truncatedSides ?? [];
+    // Expand while the user's city OR a muvla-relevant neighboring town
+    // is cut off by the fetch edge — a clipped neighbor would be squared
+    // mid-town and its extension drawn wrong.
+    const sides = detection
+      ? [...new Set([...detection.truncatedSides, ...detection.neighborTruncatedSides])]
+      : [];
     if (!detection || sides.length === 0 || isCancelled?.()) {
       return finish({
         detection,

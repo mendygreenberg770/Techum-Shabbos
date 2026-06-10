@@ -67,8 +67,9 @@ are counted as joining the city; buildings are clustered by their bounding
 boxes; the *feasible-region* shading treats the eiruv as a bare point —
 but towns that could carry the eiruv (host-town din, SA HaRav 408) are
 highlighted as placement areas even when no bare-point placement reaches;
-muvla chains are accounted sequentially (4 amos per swallowed town) but a
-chained town must sit fully within the corridor of the one in front of it;
+muvla chains are accounted sequentially and piecewise (4 amos per
+swallowed town, credited across the lateral overlap of corridors, so one
+town can produce extensions of different depths side by side);
 feasibility ignores muvla bumps (all stringencies except the bbox
 clustering, which can join slightly more than strict footprints would).
 
