@@ -49,7 +49,11 @@ export default function ExplainPanel({
             </>
           )}
           {" "}A lone house beyond the margin grants nothing — it does not
-          restart the 2,000.
+          restart the 2,000. The orange outline on the map is the exact
+          chained shape: every included building plus its joining range,
+          with anything beyond the joining distance excluded; built-up
+          areas nearby that do <i>not</i> join are drawn in brown when
+          map details are on.
         </li>
         <li>
           <b>Squaring.</b> The town is squared as a north-aligned rectangle

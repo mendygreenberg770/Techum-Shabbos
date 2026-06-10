@@ -7,6 +7,7 @@ import EruvChecklist from "./components/EruvChecklist";
 import BeyondTechumNotes from "./components/BeyondTechumNotes";
 import ExplainPanel from "./components/ExplainPanel";
 import type { CityDetection } from "./city/cluster";
+import { unionOutline } from "./city/outline";
 import { detectCityAuto, type CitySource, type ExpandProgress } from "./city/expand";
 import {
   bearingDeg,
@@ -78,6 +79,9 @@ interface CityState {
   source?: CitySource;
   /** Both OSM and the US footprints contributed buildings (union). */
   merged?: boolean;
+  /** Datasets that contributed and then failed mid-run — the city may
+   * have invisible coverage holes (chains break mid-street). */
+  lostDatasets?: string[];
 }
 
 interface EruvCityState {
@@ -131,6 +135,9 @@ export default function App() {
   const [progress, setProgress] = useState<ExpandProgress | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const [showRadiusCircle, setShowRadiusCircle] = useState(false);
+  /** Default view: plain city outline + square + techum. Details add
+   * non-joining neighbors, comparison lines, and gap highlights. */
+  const [showDetails, setShowDetails] = useState(false);
 
   const [eruvOn, setEruvOn] = useState(!!initial?.eruv);
   const [destination, setDestination] = useState<SelectedPlace | null>(
@@ -226,6 +233,7 @@ export default function App() {
           fetchError: result.fetchError,
           source: result.source,
           merged: result.merged,
+          lostDatasets: result.lostDatasets,
         });
         setProgress(null);
       })
@@ -334,6 +342,22 @@ export default function App() {
       ? cityState.detection
       : null;
   const noCityFound = cityState.status === "done" && !detection;
+
+  // Accurate (concave) city shape: member buildings dilated by half the
+  // joining distance, so chained houses form one connected outline and
+  // everything beyond the joining distance is excluded. The brown
+  // overlay shows nearby built-up areas that did NOT join.
+  const cityOutline = useMemo(
+    () => (detection ? unionOutline(detection.clusterRings, KARPEF_M / 2) : null),
+    [detection]
+  );
+  const neighborOutline = useMemo(
+    () =>
+      showDetails && detection && detection.neighborRings.length > 0
+        ? unionOutline(detection.neighborRings, KARPEF_M / 2)
+        : null,
+    [detection, showDetails]
+  );
 
   const cityBounds = manualCityBounds ?? detection?.bounds ?? null;
   const usingCity = mode === "city" && cityBounds !== null;
@@ -629,6 +653,24 @@ export default function App() {
                     )}
                   </p>
                 )}
+                {cityState.status === "done" &&
+                  cityState.lostDatasets &&
+                  cityState.lostDatasets.length > 0 && (
+                    <p className="warning">
+                      ⚠ The {cityState.lostDatasets.join(" and ")} dataset
+                      {cityState.lostDatasets.length > 1 ? "s" : ""} stopped
+                      loading partway through the analysis. Missing buildings
+                      can break a 70⅔-amos chain invisibly — if the city
+                      outline cuts off mid-neighborhood, this is likely why.
+                      Retry resumes from the data already loaded.{" "}
+                      <button
+                        className="link-button"
+                        onClick={() => setRetryNonce((n) => n + 1)}
+                      >
+                        Retry
+                      </button>
+                    </p>
+                  )}
                 {cityState.status === "done" && cityState.fetchError && (
                   <p className="warning">
                     ⚠ Building data stopped loading partway (
@@ -833,8 +875,21 @@ export default function App() {
                         onChange={(e) => setKarpefOn(e.target.checked)}
                       />
                       Add karpef (70⅔ amos ≈ {KARPEF_M.toFixed(1)} m) around
-                      the city before measuring (the other view's line stays
-                      visible in gray — see "How this was calculated").
+                      the city before measuring (the other view's comparison
+                      line shows in gray with details on — see "How this was
+                      calculated").
+                    </label>
+                    <label className="toggle">
+                      <input
+                        type="checkbox"
+                        checked={showDetails}
+                        onChange={(e) => setShowDetails(e.target.checked)}
+                      />
+                      Show calculation details on the map: nearby built-up
+                      areas that do <b>not</b> join the city (brown), open
+                      stretches too wide to square over (magenta), and the
+                      karpef comparison line (gray). Default view shows just
+                      the city outline, its square, and the techum.
                     </label>
                     <label className="toggle">
                       <input
@@ -1158,7 +1213,8 @@ export default function App() {
             <details className="legend">
               <summary>Map legend</summary>
               <ul>
-                <li><span className="swatch" style={{ background: "#e66100" }} /> Detected city cluster (hull)</li>
+                <li><span className="swatch" style={{ background: "#e66100" }} /> City outline (chained buildings, exact shape)</li>
+                <li><span className="swatch" style={{ background: "#986a44" }} /> Nearby areas that do NOT join (details on)</li>
                 <li><span className="swatch" style={{ background: "#26a269" }} /> Squared city</li>
                 <li><span className="swatch" style={{ background: "#1a5fb4" }} /> Techum (incl. muvla extensions)</li>
                 <li><span className="swatch" style={{ background: "#99c1f1" }} /> City swallowed in the techum (muvla — counts as 4 amos)</li>
@@ -1217,17 +1273,20 @@ export default function App() {
           <MapView
             place={place}
             techumBounds={view?.techum ?? null}
-            altTechumBounds={view?.altTechum ?? null}
+            altTechumBounds={showDetails ? view?.altTechum ?? null : null}
             techumBumps={view?.bumps.map((b) => b.bounds) ?? []}
             swallowedCities={view?.bumps.map((b) => b.city) ?? []}
             cityBounds={usingCity ? cityBounds : null}
-            hull={usingCity && !manualCityBounds ? detection?.hull ?? null : null}
+            cityOutline={usingCity && !manualCityBounds ? cityOutline : null}
+            neighborOutline={neighborOutline}
             cityEditable={adjusting}
             onCityBoundsChange={(b) => setManualCityBounds(b)}
             showRadiusCircle={mode === "point" && showRadiusCircle}
             partialCities={partialCities}
             bowGapRects={
-              usingCity && !manualCityBounds ? detection?.bowGapRects ?? [] : []
+              showDetails && usingCity && !manualCityBounds
+                ? detection?.bowGapRects ?? []
+                : []
             }
             destination={eruvOn ? destination : null}
             feasibleRegion={placingEruv && !rotated ? plan!.feasibleRegion : null}

@@ -18,8 +18,11 @@ interface Props {
   altTechumBounds: Bounds | null;
   /** The squared city (green); editable when cityEditable is set. */
   cityBounds: Bounds | null;
-  /** Convex hull of the detected building cluster (orange). */
-  hull: LatLng[] | null;
+  /** Accurate (concave) city shape: chained buildings dilated by half
+   * the joining distance — one or more rings (orange). */
+  cityOutline: LatLng[][] | null;
+  /** Nearby built-up areas that did NOT join the city (brown rings). */
+  neighborOutline: LatLng[][] | null;
   cityEditable: boolean;
   onCityBoundsChange: (b: Bounds) => void;
   showRadiusCircle: boolean;
@@ -172,7 +175,8 @@ export default function MapView(props: Props) {
   const cityRef = useRef<google.maps.Rectangle | null>(null);
   const feasibleRef = useRef<google.maps.Rectangle | null>(null);
   const newTechumRef = useRef<google.maps.Rectangle | null>(null);
-  const hullRef = useRef<google.maps.Polygon | null>(null);
+  const cityOutlineRef = useRef<google.maps.Polygon | null>(null);
+  const neighborOutlineRef = useRef<google.maps.Polygon | null>(null);
   const circleRef = useRef<google.maps.Circle | null>(null);
   const bumpPool = useRef<google.maps.Rectangle[]>([]);
   const swallowedPool = useRef<google.maps.Rectangle[]>([]);
@@ -227,7 +231,8 @@ export default function MapView(props: Props) {
     bowGapRects,
     altTechumBounds,
     cityBounds,
-    hull,
+    cityOutline,
+    neighborOutline,
     cityEditable,
     showRadiusCircle,
     destination,
@@ -325,22 +330,39 @@ export default function MapView(props: Props) {
       appliedCityBounds.current = null;
     }
 
-    // Detected cluster hull (orange)
-    if (!hullRef.current) {
-      hullRef.current = new google.maps.Polygon({
+    // Accurate city shape (orange) and non-joining neighbors (brown).
+    if (!cityOutlineRef.current) {
+      cityOutlineRef.current = new google.maps.Polygon({
         strokeColor: "#e66100",
-        strokeOpacity: 0.8,
-        strokeWeight: 1.5,
+        strokeOpacity: 0.85,
+        strokeWeight: 2,
         fillColor: "#e66100",
-        fillOpacity: 0.04,
+        fillOpacity: 0.05,
         clickable: false,
       });
     }
-    if (hull && hull.length >= 3) {
-      hullRef.current.setPath(hull);
-      hullRef.current.setMap(map);
+    if (cityOutline && cityOutline.length > 0) {
+      cityOutlineRef.current.setPaths(cityOutline);
+      cityOutlineRef.current.setMap(map);
     } else {
-      hullRef.current.setMap(null);
+      cityOutlineRef.current.setMap(null);
+    }
+
+    if (!neighborOutlineRef.current) {
+      neighborOutlineRef.current = new google.maps.Polygon({
+        strokeColor: "#986a44",
+        strokeOpacity: 0.85,
+        strokeWeight: 1.5,
+        fillColor: "#986a44",
+        fillOpacity: 0.07,
+        clickable: false,
+      });
+    }
+    if (neighborOutline && neighborOutline.length > 0) {
+      neighborOutlineRef.current.setPaths(neighborOutline);
+      neighborOutlineRef.current.setMap(map);
+    } else {
+      neighborOutlineRef.current.setMap(null);
     }
 
     // Illustrative pre-squaring radius circle (point mode)

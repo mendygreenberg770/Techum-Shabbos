@@ -71,6 +71,13 @@ export interface CityDetection {
   /** The over-limit open stretches themselves, as lat/lng rectangles
    * for highlighting on the map (largest first, capped). */
   bowGapRects: Bounds[];
+  /** Member building footprints of the user's cluster (references to
+   * the input rings) — the accurate city shape is drawn from these. */
+  clusterRings: LatLng[][];
+  /** Footprints of every cluster within techum reach that did NOT join
+   * the user's city (including lone structures): the "not combining"
+   * areas, drawn distinctly so exclusions are visible and reviewable. */
+  neighborRings: LatLng[][];
 }
 
 interface Vertex {
@@ -410,10 +417,13 @@ export function detectCity(
   const reach = expandBounds(bounds, TECHUM_M + KARPEF_M + 100);
   const otherCities: Bounds[] = [];
   const otherRoots = new Set<number>();
+  const displayRoots = new Set<number>();
   for (const [r, cb] of clusterBounds) {
-    if (r === root || cb.count < minCitySize) continue;
+    if (r === root) continue;
     const b: Bounds = { north: cb.north, south: cb.south, east: cb.east, west: cb.west };
-    if (rectIntersect(reach, b)) {
+    if (!rectIntersect(reach, b)) continue;
+    displayRoots.add(r);
+    if (cb.count >= minCitySize) {
       otherCities.push(b);
       otherRoots.add(r);
     }
@@ -423,12 +433,19 @@ export function detectCity(
   // Relevant neighbor clusters are checked for truncation too — a town
   // clipped by the fetch edge would otherwise be squared mid-town.
   const clusterVerts: Vertex[] = [];
+  const clusterRings: LatLng[][] = [];
+  const neighborRings: LatLng[][] = [];
   const truncated = new Set<Side>();
   const neighborTruncated = new Set<Side>();
   const marginLat = (TWO_CITIES_JOIN_M + 5) / perDegLat;
   const marginLng = (TWO_CITIES_JOIN_M + 5) / perDegLng;
   for (let i = 0; i < N; i++) {
     const r = uf.find(i);
+    if (r === root) {
+      clusterRings.push(buildingPolys[i]);
+    } else if (displayRoots.has(r)) {
+      neighborRings.push(buildingPolys[i]);
+    }
     const target =
       r === root ? truncated : otherRoots.has(r) ? neighborTruncated : null;
     if (!target) continue;
@@ -454,6 +471,8 @@ export function detectCity(
     otherCities,
     bowGapM: bow?.maxGapM ?? null,
     bowGapRects: bow?.rects ?? [],
+    clusterRings,
+    neighborRings,
   };
 }
 

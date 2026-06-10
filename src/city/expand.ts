@@ -42,6 +42,9 @@ export interface ExpandResult {
   /** Label override when the nominal source ended up unused — e.g. OSM
    * returned nothing and ArcGIS supplied every building. */
   effectiveSource?: CitySource;
+  /** Datasets that contributed buildings and then failed mid-run — the
+   * detected city may have invisible coverage holes; Retry resumes. */
+  lostDatasets?: string[];
 }
 
 const INITIAL_HALF_M = 1200;
@@ -88,6 +91,10 @@ export async function detectCityExpanding(
   /** Raw (pre-dedupe) ArcGIS features seen — zero in the initial area
    * means we are outside the US layers' coverage. */
   let agsRaw = 0;
+  /** Datasets that contributed and then failed mid-run: quietly absent
+   * data punches invisible holes in the city (chains break
+   * mid-street), so the loss is surfaced to the UI. */
+  const lostDatasets = new Set<string>();
 
   // Cross-dataset duplicate filter: the same building reported by both
   // OSM and ArcGIS must count once. Duplicates were inflating building
@@ -183,10 +190,16 @@ export async function detectCityExpanding(
         }
       } else {
         // A dataset that failed stays off for the rest of the run — no
-        // re-crawling a dead endpoint cascade every expansion round.
+        // re-crawling a dead endpoint cascade every expansion round —
+        // but the loss is reported (see lostDatasets).
         firstError ??= r.reason;
-        if (kind === "osm") useOsm = false;
-        else useAgs = false;
+        if (kind === "osm") {
+          useOsm = false;
+          if (osmCount > 0) lostDatasets.add("OpenStreetMap");
+        } else {
+          useAgs = false;
+          if (agsRaw > 0) lostDatasets.add("US footprints");
+        }
       }
     });
     if (!anyOk) {
@@ -201,6 +214,7 @@ export async function detectCityExpanding(
     merged: source === "buildings" && osmCount > 0 && agsCount > 0 ? true : undefined,
     effectiveSource:
       source === "buildings" && osmCount === 0 && agsCount > 0 ? "arcgis" : undefined,
+    lostDatasets: lostDatasets.size > 0 ? [...lostDatasets] : undefined,
   });
 
   // The very first fetch failing means no data at all — let it throw,
