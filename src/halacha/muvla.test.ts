@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeMuvlaBumps } from "./muvla";
+import { computeMuvlaBumps, mergeCities } from "./muvla";
 import {
   expandBounds,
   metersPerDegree,
@@ -76,5 +76,33 @@ describe("computeMuvlaBumps (ir muvla'as counts as 4 amos)", () => {
     // Overlaps home's latitude band and its longitude band → no bump.
     const city = rectM(-40, -40, 40, 40);
     expect(computeMuvlaBumps(home, techum, [city])).toHaveLength(0);
+  });
+});
+
+describe("mergeCities (home-side + eiruv-side detections)", () => {
+  const home = rectM(-50, -50, 50, 50);
+
+  it("keeps distinct cities from both lists", () => {
+    const far = rectM(2000, -50, 2200, 50);
+    expect(mergeCities([home], [far])).toEqual([home, far]);
+  });
+
+  it("drops an extra rect that substantially duplicates a primary one", () => {
+    // The same city re-detected around the eiruv with slightly different bounds.
+    const redetected = rectM(-45, -55, 55, 45);
+    expect(mergeCities([home], [redetected])).toEqual([home]);
+  });
+
+  it("keeps an extra rect that only grazes a primary one", () => {
+    // Adjacent city whose squared bounds barely overlap the home's corner.
+    const neighbor = rectM(40, 40, 300, 300);
+    expect(mergeCities([home], [neighbor])).toEqual([home, neighbor]);
+  });
+
+  it("preserves the primary rect's identity for the duplicate", () => {
+    const redetected = { ...home };
+    const merged = mergeCities([home], [redetected]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toBe(home);
   });
 });

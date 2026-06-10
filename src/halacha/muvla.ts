@@ -1,5 +1,5 @@
 import { FOUR_AMOS_M, TECHUM_M } from "./shiurim";
-import { metersPerDegree, type Bounds } from "./geometry";
+import { metersPerDegree, rectIntersect, type Bounds } from "./geometry";
 
 /**
  * Ir muvla'as bitoch hatechum (SA HaRav 408:1): a city that lies
@@ -39,6 +39,27 @@ export function rectContainedIn(inner: Bounds, outer: Bounds): boolean {
     inner.east <= outer.east + epsLng &&
     inner.west >= outer.west - epsLng
   );
+}
+
+/**
+ * Merge city lists coming from two separate detections (e.g., around
+ * the home address and around the eiruv spot). An `extra` rect that
+ * substantially duplicates a `primary` one — their overlap covers at
+ * least half of the smaller rect — is dropped, so the same city found
+ * by both analyses is counted once (and keeps its `primary` identity).
+ */
+export function mergeCities(primary: Bounds[], extra: Bounds[]): Bounds[] {
+  const area = (b: Bounds) =>
+    Math.max(0, b.north - b.south) * Math.max(0, b.east - b.west);
+  const out = [...primary];
+  for (const e of extra) {
+    const dup = primary.some((p) => {
+      const overlap = rectIntersect(p, e);
+      return overlap !== null && area(overlap) >= 0.5 * Math.min(area(p), area(e));
+    });
+    if (!dup) out.push(e);
+  }
+  return out;
 }
 
 export function computeMuvlaBumps(

@@ -18,7 +18,7 @@ import {
   rotatedFeasible,
   roundedRectRing,
 } from "./halacha/eruv";
-import { computeMuvlaBumps, rectContainedIn } from "./halacha/muvla";
+import { computeMuvlaBumps, mergeCities, rectContainedIn } from "./halacha/muvla";
 import {
   distanceMeters,
   expandBounds,
@@ -71,6 +71,16 @@ interface CityState {
   fetchError?: string;
 }
 
+interface EruvCityState {
+  status: "idle" | "loading" | "done" | "error";
+  detection?: CityDetection;
+  error?: string;
+}
+
+/** A cluster must have at least this many buildings to count as a town
+ * (matches MIN_CITY_SIZE in the cluster engine — a working assumption). */
+const MIN_TOWN_BUILDINGS = 2;
+
 const fmtAmos = (m: number) => Math.round(m / AMAH_M).toLocaleString();
 
 export default function App() {
@@ -106,6 +116,8 @@ export default function App() {
   const [eruvSpot, setEruvSpot] = useState<LatLng | null>(null);
   const [rotationOn, setRotationOn] = useState(initial?.eruv?.rotationOn ?? false);
   const [rotationOffset, setRotationOffset] = useState(0);
+  const [eruvCityState, setEruvCityState] = useState<EruvCityState>({ status: "idle" });
+  const [eruvRetryNonce, setEruvRetryNonce] = useState(0);
 
   // Restoring a snapshot (shared link or saved location) must survive the
   // reset effects below, which clear the manual boundary and eiruv spot
@@ -220,6 +232,48 @@ export default function App() {
     pendingEruvRef.current = null;
   }, [place, destination, mode, restoreNonce]);
 
+  // The town situation around the eiruv spot: an eiruv resting inside a
+  // town (or its ibur margin) extends the techum from that whole town's
+  // squared edge (SA HaRav 408), and towns swallowed by the new techum
+  // count as 4 amos — so the city around the spot must be detected too.
+  // Debounced: the marker is draggable.
+  useEffect(() => {
+    if (!eruvOn || !eruvSpot) {
+      setEruvCityState({ status: "idle" });
+      return;
+    }
+    let cancelled = false;
+    const controller = new AbortController();
+    setEruvCityState({ status: "loading" });
+    const timer = window.setTimeout(() => {
+      detectCityExpanding(
+        eruvSpot,
+        LIMITS[limitKey],
+        undefined,
+        () => cancelled,
+        controller.signal
+      )
+        .then((result) => {
+          if (!cancelled) {
+            setEruvCityState({ status: "done", detection: result.detection ?? undefined });
+          }
+        })
+        .catch((e) => {
+          if (!cancelled) {
+            setEruvCityState({
+              status: "error",
+              error: e instanceof Error ? e.message : String(e),
+            });
+          }
+        });
+    }, 400);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [eruvOn, eruvSpot, limitKey, eruvRetryNonce]);
+
   // Keep the URL hash in sync with the view, so the address bar is
   // always a shareable link to exactly what is on screen.
   const snapshot = useMemo<AppSnapshot | null>(() => {
@@ -254,9 +308,22 @@ export default function App() {
 
   const cityBounds = manualCityBounds ?? detection?.bounds ?? null;
   const usingCity = mode === "city" && cityBounds !== null;
+  // While the city is being analyzed, no techum is drawn at all — a
+  // point-based line shown in the meantime would understate the real
+  // techum and invite reliance on the wrong boundary.
+  const cityLoading =
+    mode === "city" &&
+    place !== null &&
+    cityState.status !== "done" &&
+    cityState.status !== "error";
+  // The eiruv-spot analysis must settle (or fail → bare-point fallback,
+  // a stringency) before the new techum is drawn.
+  const eruvCityResolved =
+    eruvCityState.status === "done" || eruvCityState.status === "error";
+  const eruvCityChecking = eruvCityState.status === "loading";
 
   const view = useMemo(() => {
-    if (!place) return null;
+    if (!place || cityLoading) return null;
     const otherCities = detection?.otherCities ?? [];
     const base =
       usingCity && cityBounds
@@ -285,10 +352,26 @@ export default function App() {
 
     const plan =
       eruvOn && destination ? planEruv(techum, bumps, destination.location) : null;
-    const allCities =
-      usingCity && cityBounds ? [cityBounds, ...otherCities] : otherCities;
+    // Towns detected around the eiruv spot (host town + neighbors for
+    // the muvla din), merged with the home-side list; the home city
+    // stays first so the "eiruv inside your own town" check keeps its
+    // identity.
+    const eruvDetection =
+      eruvCityState.status === "done" ? eruvCityState.detection : undefined;
+    const eruvCities = eruvDetection
+      ? [
+          ...(eruvDetection.clusterSize >= MIN_TOWN_BUILDINGS
+            ? [eruvDetection.bounds]
+            : []),
+          ...eruvDetection.otherCities,
+        ]
+      : [];
+    const allCities = mergeCities(
+      usingCity && cityBounds ? [cityBounds, ...otherCities] : otherCities,
+      eruvCities
+    );
     const placement =
-      plan && !plan.destinationInHomeTechum && destination && eruvSpot
+      plan && !plan.destinationInHomeTechum && destination && eruvSpot && eruvCityResolved
         ? placeEruv(
             eruvSpot,
             destination.location,
@@ -348,7 +431,7 @@ export default function App() {
     }
 
     return { techum, altTechum, bumps, partialCities, plan, placement, rotated, fit };
-  }, [place, usingCity, cityBounds, karpefOn, detection, eruvOn, destination, eruvSpot, rotationOn, rotationOffset]);
+  }, [place, cityLoading, usingCity, cityBounds, karpefOn, detection, eruvOn, destination, eruvSpot, eruvCityState, eruvCityResolved, rotationOn, rotationOffset]);
 
   if (!apiKey || authFailed) {
     return (
@@ -433,11 +516,17 @@ export default function App() {
                   </select>
                 </div>
 
-                {cityState.status === "loading" && (
-                  <p className="muted">
-                    {progress
-                      ? `Analyzing… ${progress.buildings.toLocaleString()} buildings so far; the city continues ${progress.expandingSides.join(", ")} — expanding the analyzed area (round ${progress.iteration}).`
-                      : "Fetching buildings from OpenStreetMap…"}
+                {cityLoading && (
+                  <p className="loading">
+                    <span className="spinner" />
+                    <span>
+                      <b>Calculating the city limits…</b>{" "}
+                      {progress
+                        ? `${progress.buildings.toLocaleString()} buildings so far; the city continues ${progress.expandingSides.join(", ")} — expanding the analyzed area (round ${progress.iteration}).`
+                        : "Fetching buildings from OpenStreetMap (this can take a minute for a large city)."}{" "}
+                      The techum will be drawn once the city boundary is
+                      resolved.
+                    </span>
                   </p>
                 )}
                 {cityState.status === "error" && (
@@ -570,11 +659,13 @@ export default function App() {
                 <tr>
                   <td>Basis</td>
                   <td>
-                    {usingCity
-                      ? manualCityBounds
-                        ? "Squared city (manually adjusted)"
-                        : "Squared city (detected)"
-                      : "Lone dwelling (point)"}
+                    {cityLoading
+                      ? "Calculating city limits…"
+                      : usingCity
+                        ? manualCityBounds
+                          ? "Squared city (manually adjusted)"
+                          : "Squared city (detected)"
+                        : "Lone dwelling (point)"}
                   </td>
                 </tr>
                 <tr>
@@ -720,7 +811,32 @@ export default function App() {
                             />
                           </label>
                         )}
-                        {eruvSpot && (
+                        {eruvSpot && !rotationOn && eruvCityChecking && (
+                          <p className="loading">
+                            <span className="spinner" />
+                            <span>
+                              Checking for a town around the eiruv spot
+                              (SA HaRav 408)… The new techum will be drawn
+                              when this resolves.
+                            </span>
+                          </p>
+                        )}
+                        {eruvSpot && !rotationOn && eruvCityState.status === "error" && (
+                          <p className="warning">
+                            ⚠ Building data around the eiruv spot failed to
+                            load ({eruvCityState.error}) — the eiruv is
+                            treated as a bare point (a stringency: a host
+                            town would extend the new techum from its
+                            edge).{" "}
+                            <button
+                              className="link-button"
+                              onClick={() => setEruvRetryNonce((n) => n + 1)}
+                            >
+                              Retry
+                            </button>
+                          </p>
+                        )}
+                        {eruvSpot && (rotationOn || eruvCityResolved) && (
                           <>
                             {!spotOk && (
                               <p className="warning">
@@ -749,6 +865,13 @@ export default function App() {
                                 (e.g., your own city) counts as only 4 amos —
                                 the purple techum extends beyond it
                                 (SA HaRav 408:1).
+                              </p>
+                            )}
+                            {!rotationOn && placement && !placement.hostCity && (
+                              <p className="muted">
+                                No town within 70⅔ amos of the eiruv spot —
+                                the new techum is measured from the point
+                                itself.
                               </p>
                             )}
                             {!rotationOn &&
@@ -780,10 +903,12 @@ export default function App() {
                             )}
                             <p className="muted">
                               Eiruv spot: {eruvSpot.lat.toFixed(5)},{" "}
-                              {eruvSpot.lng.toFixed(5)}. The eiruv is treated
-                              as a bare point; the bonus of an eiruv resting
-                              inside another city is not yet credited (a
-                              stringency).
+                              {eruvSpot.lng.toFixed(5)}. The area around the
+                              spot is analyzed automatically: an eiruv
+                              resting inside a town extends the new techum
+                              from that town's squared edge, and towns fully
+                              swallowed by the new techum count as 4 amos
+                              (SA HaRav 408).
                               {rotationOn &&
                                 " With the corner kula, gained/lost shading and 4-amos extensions are not drawn — the diamond itself is the new techum."}
                             </p>
@@ -839,6 +964,19 @@ export default function App() {
         </footer>
       </aside>
       <main className="map-wrap">
+        {place && cityLoading && (
+          <div className="map-loading">
+            <span className="spinner" />
+            Calculating the city limits…
+            {progress ? ` ${progress.buildings.toLocaleString()} buildings` : ""}
+          </div>
+        )}
+        {place && !cityLoading && eruvCityChecking && !rotationOn && (
+          <div className="map-loading">
+            <span className="spinner" />
+            Checking for a town around the eiruv spot…
+          </div>
+        )}
         {mapsReady && (
           <MapView
             place={place}

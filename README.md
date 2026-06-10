@@ -31,11 +31,17 @@ See [DESIGN.md](DESIGN.md) for the full design and roadmap.
 - **Eiruv techumin planner**: enter a destination; if it's beyond the
   techum the app shades the feasible placement region (within your current
   techum *and* close enough to cover the destination). Click or drag the
-  eiruv marker to place it: the new techum is drawn with gained (green)
-  and lost (red) areas, the muvla din credits your own city as 4 amos
-  within the new techum, and a checklist with the brachah and declaration
-  (per Ketzos HaShulchan) is provided. Kinyan shevisa b'raglav is noted as
-  the no-food alternative.
+  eiruv marker to place it: the city **around the eiruv spot is analyzed
+  too** — an eiruv resting inside a town (or its ibur margin) extends the
+  new techum from that town's squared edge (SA HaRav 408), and towns
+  swallowed by the new techum count as 4 amos. The new techum is drawn
+  with gained (green) and lost (red) areas, and a checklist with the
+  brachah and declaration (per Ketzos HaShulchan) is provided. Kinyan
+  shevisa b'raglav is noted as the no-food alternative.
+- **Nothing is drawn until it's resolved**: while the city (or the area
+  around the eiruv spot) is being analyzed, the app shows a progress
+  indicator instead of a boundary — a premature point-based line would
+  understate the real techum.
 
 - **Shareable links**: the URL hash always encodes the current view —
   address, settings, destination, and eiruv spot — so the address bar (or
@@ -50,10 +56,11 @@ The in-app legend lists all map colors.
 
 Known limitations / open halachic items (see DESIGN.md §6): all structures
 are counted as joining the city; buildings are clustered by their bounding
-boxes; the eiruv is treated as a bare point (no credit for resting inside
-another city); muvla chains are single-level; feasibility ignores muvla
-bumps (all stringencies except the bbox clustering, which can join
-slightly more than strict footprints would).
+boxes; the *feasible-region* shading treats the eiruv as a bare point
+(host-town credit is applied once the eiruv is placed); muvla chains are
+single-level; feasibility ignores muvla bumps (all stringencies except the
+bbox clustering, which can join slightly more than strict footprints
+would).
 
 ## Setup
 
