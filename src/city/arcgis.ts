@@ -118,7 +118,17 @@ async function fetchFromLayer(
   return out;
 }
 
-export async function fetchBuildingsArcgis(
+/** Successful per-rectangle results, so a retried analysis resumes
+ * instead of re-downloading (mirrors the Overpass query cache). */
+const rectCache = new Map<string, FetchedBuilding[]>();
+const RECT_CACHE_MAX = 120;
+
+/** Test hook: module-level cache survives between tests otherwise. */
+export function clearArcgisCache(): void {
+  rectCache.clear();
+}
+
+async function fetchOneRect(
   rect: Bounds,
   signal?: AbortSignal
 ): Promise<FetchedBuilding[]> {
@@ -135,4 +145,24 @@ export async function fetchBuildingsArcgis(
     }
   }
   throw lastError;
+}
+
+export async function fetchBuildingsArcgis(
+  rects: Bounds[],
+  signal?: AbortSignal
+): Promise<FetchedBuilding[]> {
+  const out: FetchedBuilding[] = [];
+  for (const rect of rects) {
+    const key = `${rect.west},${rect.south},${rect.east},${rect.north}`;
+    let result = rectCache.get(key);
+    if (!result) {
+      result = await fetchOneRect(rect, signal);
+      rectCache.set(key, result);
+      if (rectCache.size > RECT_CACHE_MAX) {
+        rectCache.delete(rectCache.keys().next().value!);
+      }
+    }
+    out.push(...result);
+  }
+  return out;
 }

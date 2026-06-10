@@ -1,8 +1,8 @@
 import { detectCity, type CityDetection, type Side } from "./cluster";
 import { fetchBuildingsArcgis } from "./arcgis";
 import {
-  fetchBuildingsInRect,
-  fetchSettledAreasInRect,
+  fetchBuildingsInRects,
+  fetchSettledAreasInRects,
   type FetchedBuilding,
 } from "./overpass";
 import {
@@ -37,6 +37,9 @@ export interface ExpandResult {
   /** Set when building data stopped loading mid-expansion: the result
    * is based on what was fetched so far and may be incomplete. */
   fetchError?: string;
+  /** True when OSM stopped responding partway and the remaining area
+   * was filled in from the ArcGIS US footprints. */
+  mixedSources?: boolean;
 }
 
 const INITIAL_HALF_M = 1200;
@@ -50,11 +53,11 @@ export type CitySource = "buildings" | "arcgis" | "areas";
 
 const FETCHERS: Record<
   CitySource,
-  (r: Bounds, signal?: AbortSignal) => Promise<FetchedBuilding[]>
+  (rects: Bounds[], signal?: AbortSignal) => Promise<FetchedBuilding[]>
 > = {
-  buildings: fetchBuildingsInRect,
+  buildings: fetchBuildingsInRects,
   arcgis: fetchBuildingsArcgis,
-  areas: fetchSettledAreasInRect,
+  areas: fetchSettledAreasInRects,
 };
 
 export async function detectCityExpanding(
@@ -70,27 +73,47 @@ export async function detectCityExpanding(
   const byId = new Map<number | string, LatLng[]>();
   const fetcher = FETCHERS[source];
   const minCitySize = source === "areas" ? 1 : undefined;
+  let mixedSources = false;
 
-  const fetchInto = async (r: Bounds) => {
-    for (const b of await fetcher(r, signal)) {
-      byId.set(b.id, b.ring);
+  const fetchInto = async (rects: Bounds[], allowFallback = false) => {
+    try {
+      for (const b of await fetcher(rects, signal)) {
+        byId.set(b.id, b.ring);
+      }
+    } catch (e) {
+      const interrupted = signal?.aborted || isCancelled?.();
+      if (!allowFallback || interrupted || source !== "buildings") throw e;
+      // OSM stopped responding mid-expansion (rate limit / blocked):
+      // fill the remaining strips from the ArcGIS US footprints instead
+      // of truncating the city. Duplicate buildings at the seams are
+      // harmless — same footprint, same cluster.
+      for (const b of await fetchBuildingsArcgis(rects, signal)) {
+        byId.set(b.id, b.ring);
+      }
+      mixedSources = true;
     }
   };
 
-  // The very first fetch failing means no data at all — let it throw.
-  await fetchInto(rect);
+  // The very first fetch failing means no data at all — let it throw,
+  // detectCityAuto moves on to the next source cleanly.
+  await fetchInto([rect]);
   let detection: CityDetection | null = null;
   for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     detection = detectCity(center, [...byId.values()], rect, minCitySize);
     const sides = detection?.truncatedSides ?? [];
     if (!detection || sides.length === 0 || isCancelled?.()) {
-      return { detection, fetchedRect: rect, capped: isCancelled?.() ?? false };
+      return {
+        detection,
+        fetchedRect: rect,
+        capped: isCancelled?.() ?? false,
+        mixedSources,
+      };
     }
 
     const spanNS = (rect.north - rect.south) * perDegLat;
     const spanEW = (rect.east - rect.west) * perDegLng;
     if (byId.size >= limits.maxBuildings || Math.max(spanNS, spanEW) >= limits.maxSpanM) {
-      return { detection, fetchedRect: rect, capped: true };
+      return { detection, fetchedRect: rect, capped: true, mixedSources };
     }
 
     onProgress?.({ buildings: byId.size, iteration, expandingSides: sides });
@@ -119,25 +142,28 @@ export async function detectCityExpanding(
       strips.push({ north: old.north, south: old.south, east: old.west, west: rect.west });
     }
     try {
-      for (const s of strips) {
-        if (isCancelled?.()) break;
-        await fetchInto(s);
+      // One union request per round instead of one per strip — fewer
+      // requests means fewer rate-limit failures on the public servers.
+      if (strips.length > 0 && !isCancelled?.()) {
+        await fetchInto(strips, true);
       }
     } catch (e) {
       if (isCancelled?.() || signal?.aborted) {
-        return { detection, fetchedRect: old, capped: true };
+        return { detection, fetchedRect: old, capped: true, mixedSources };
       }
-      // Mid-expansion failure: keep the city detected so far (with its
-      // truncation warnings) rather than discarding everything.
+      // Mid-expansion failure (even the fallback source): keep the city
+      // detected so far (with its truncation warnings) rather than
+      // discarding everything. The query caches make Retry resume here.
       return {
         detection,
         fetchedRect: old,
         capped: true,
+        mixedSources,
         fetchError: e instanceof Error ? e.message : String(e),
       };
     }
   }
-  return { detection, fetchedRect: rect, capped: true };
+  return { detection, fetchedRect: rect, capped: true, mixedSources };
 }
 
 export interface AutoDetectResult extends ExpandResult {

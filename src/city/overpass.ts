@@ -14,6 +14,10 @@ const ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.private.coffee/api/interpreter",
   "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+  // Same-origin serverless proxy (api/overpass.js) — deployed
+  // automatically on Vercel; if the app loads, this route can't be
+  // blocked by a network filter. Fails fast and harmlessly elsewhere.
+  "/api/overpass",
 ];
 let preferred = 0;
 
@@ -93,8 +97,21 @@ async function fetchFromEndpoint(
   return data.elements;
 }
 
+/** Successful responses, keyed by query. The expansion re-issues
+ * identical queries when a partially failed analysis is retried — the
+ * cache turns Retry into a resume instead of a full re-download. */
+const queryCache = new Map<string, OverpassElement[]>();
+const QUERY_CACHE_MAX = 120;
+
+/** Test hook: module-level cache survives between tests otherwise. */
+export function clearOverpassCache(): void {
+  queryCache.clear();
+}
+
 /** Run a query against the endpoint pool with failover and retry. */
 async function runQuery(query: string, signal?: AbortSignal): Promise<OverpassElement[]> {
+  const cached = queryCache.get(query);
+  if (cached) return cached;
   let lastError: Error = new Error("No Overpass endpoint available");
   for (let pass = 0; pass < RETRY_PASSES; pass++) {
     if (pass > 0) await delay(RETRY_DELAY_MS * pass, signal);
@@ -103,6 +120,10 @@ async function runQuery(query: string, signal?: AbortSignal): Promise<OverpassEl
       try {
         const result = await fetchFromEndpoint(ENDPOINTS[idx], query, signal);
         preferred = idx;
+        queryCache.set(query, result);
+        if (queryCache.size > QUERY_CACHE_MAX) {
+          queryCache.delete(queryCache.keys().next().value!);
+        }
         return result;
       } catch (e) {
         if (signal?.aborted) throw e;
@@ -125,12 +146,18 @@ async function runQuery(query: string, signal?: AbortSignal): Promise<OverpassEl
  * Known limitation: multipolygon relation buildings are skipped; these
  * are rare for dwellings.
  */
-export async function fetchBuildingsInRect(
-  rect: Bounds,
+const bboxOf = (r: Bounds) => `${r.south},${r.west},${r.north},${r.east}`;
+
+/** Several rectangles are fetched as ONE union query — the expansion
+ * adds up to four strips per round, and one request instead of four
+ * keeps the rate limits of the public servers at bay. */
+export async function fetchBuildingsInRects(
+  rects: Bounds[],
   signal?: AbortSignal
 ): Promise<FetchedBuilding[]> {
-  const bbox = `${rect.south},${rect.west},${rect.north},${rect.east}`;
-  const query = `[out:json][timeout:60];way[building](${bbox});out ids bb qt;`;
+  if (rects.length === 0) return [];
+  const union = rects.map((r) => `way[building](${bboxOf(r)});`).join("");
+  const query = `[out:json][timeout:60];(${union});out ids bb qt;`;
   const elements = await runQuery(query, signal);
   return elements
     .filter((el) => el.type === "way" && el.bounds)
@@ -148,6 +175,13 @@ export async function fetchBuildingsInRect(
     });
 }
 
+export function fetchBuildingsInRect(
+  rect: Bounds,
+  signal?: AbortSignal
+): Promise<FetchedBuilding[]> {
+  return fetchBuildingsInRects([rect], signal);
+}
+
 /**
  * Fallback for regions where OSM has no individual building footprints
  * (common in parts of the US): fetch settled-area outlines
@@ -159,12 +193,15 @@ export async function fetchBuildingsInRect(
  * but large, and their bounding boxes would badly overstate the city
  * (a kula) — the exact outlines keep the clustering honest.
  */
-export async function fetchSettledAreasInRect(
-  rect: Bounds,
+export async function fetchSettledAreasInRects(
+  rects: Bounds[],
   signal?: AbortSignal
 ): Promise<FetchedBuilding[]> {
-  const bbox = `${rect.south},${rect.west},${rect.north},${rect.east}`;
-  const query = `[out:json][timeout:60];way[landuse~"^(residential|commercial|retail)$"](${bbox});out geom qt;`;
+  if (rects.length === 0) return [];
+  const union = rects
+    .map((r) => `way[landuse~"^(residential|commercial|retail)$"](${bboxOf(r)});`)
+    .join("");
+  const query = `[out:json][timeout:60];(${union});out geom qt;`;
   const elements = await runQuery(query, signal);
   return elements
     .filter((el) => el.type === "way" && (el.geometry?.length ?? 0) >= 3)
@@ -175,4 +212,11 @@ export async function fetchSettledAreasInRect(
       if (last.lat === pts[0].lat && last.lng === pts[0].lng) pts.pop();
       return { id: el.id, ring: pts };
     });
+}
+
+export function fetchSettledAreasInRect(
+  rect: Bounds,
+  signal?: AbortSignal
+): Promise<FetchedBuilding[]> {
+  return fetchSettledAreasInRects([rect], signal);
 }

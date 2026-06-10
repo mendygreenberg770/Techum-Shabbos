@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchBuildingsArcgis } from "./arcgis";
+import { clearArcgisCache, fetchBuildingsArcgis } from "./arcgis";
 
 const rect = { north: 42.95, south: 42.94, east: -78.86, west: -78.87 };
 
@@ -27,6 +27,7 @@ const polygonFeature = (id: number, lng: number, lat: number, s = 0.0001) => ({
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  clearArcgisCache();
 });
 
 describe("fetchBuildingsArcgis", () => {
@@ -35,7 +36,7 @@ describe("fetchBuildingsArcgis", () => {
       "fetch",
       vi.fn(async () => okJson({ type: "FeatureCollection", features: [polygonFeature(5, -78.866, 42.944)] }))
     );
-    const result = await fetchBuildingsArcgis(rect);
+    const result = await fetchBuildingsArcgis([rect]);
     expect(result).toHaveLength(1);
     expect(result[0].ring).toHaveLength(4);
     expect(result[0].ring[0]).toEqual({ lat: 42.944, lng: -78.866 });
@@ -54,7 +55,7 @@ describe("fetchBuildingsArcgis", () => {
       },
     };
     vi.stubGlobal("fetch", vi.fn(async () => okJson({ features: [feature] })));
-    const result = await fetchBuildingsArcgis(rect);
+    const result = await fetchBuildingsArcgis([rect]);
     expect(result).toHaveLength(1);
     // Bbox spans both parts.
     expect(result[0].ring[0]).toEqual({ lat: 42.944, lng: -78.866 });
@@ -77,7 +78,7 @@ describe("fetchBuildingsArcgis", () => {
           : okJson({ features: [polygonFeature(2, -78.865, 42.945)] });
       })
     );
-    const result = await fetchBuildingsArcgis(rect);
+    const result = await fetchBuildingsArcgis([rect]);
     expect(result).toHaveLength(2);
     expect(offsets).toEqual(["0", "2000"]);
   });
@@ -92,14 +93,14 @@ describe("fetchBuildingsArcgis", () => {
         return okJson({ features: [polygonFeature(3, -78.866, 42.944)] });
       })
     );
-    const result = await fetchBuildingsArcgis(rect);
+    const result = await fetchBuildingsArcgis([rect]);
     expect(result).toHaveLength(1);
     expect(call).toBe(2);
   });
 
   it("returns empty outside US coverage rather than failing", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => okJson({ features: [] })));
-    await expect(fetchBuildingsArcgis(rect)).resolves.toEqual([]);
+    await expect(fetchBuildingsArcgis([rect])).resolves.toEqual([]);
   });
 
   it("queries with a 4326 envelope of the requested rectangle", async () => {
@@ -111,7 +112,7 @@ describe("fetchBuildingsArcgis", () => {
         return okJson({ features: [] });
       })
     );
-    await fetchBuildingsArcgis(rect);
+    await fetchBuildingsArcgis([rect]);
     const params = new URL(captured).searchParams;
     expect(params.get("geometry")).toBe("-78.87,42.94,-78.86,42.95");
     expect(params.get("inSR")).toBe("4326");

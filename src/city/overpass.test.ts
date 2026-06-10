@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchBuildingsInRect, fetchSettledAreasInRect } from "./overpass";
+import {
+  clearOverpassCache,
+  fetchBuildingsInRect,
+  fetchBuildingsInRects,
+  fetchSettledAreasInRect,
+} from "./overpass";
 
 const rect = { north: 40.67, south: 40.66, east: -73.94, west: -73.95 };
 
@@ -18,6 +23,7 @@ const building = {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  clearOverpassCache();
 });
 
 describe("fetchBuildingsInRect", () => {
@@ -74,8 +80,32 @@ describe("fetchBuildingsInRect", () => {
     const assertion = expect(fetchBuildingsInRect(rect)).rejects.toThrow("HTTP 504");
     await vi.advanceTimersByTimeAsync(10_000);
     await assertion;
-    // 2 passes over 3 endpoints
-    expect(fetchMock).toHaveBeenCalledTimes(6);
+    // 2 passes over 4 endpoints (3 public + the same-origin proxy)
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+  });
+
+  it("serves repeated identical queries from the cache (retry resumes)", async () => {
+    const fetchMock = vi.fn(async () => okJson({ elements: [building] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const first = await fetchBuildingsInRect(rect);
+    const second = await fetchBuildingsInRect(rect);
+    expect(second).toEqual(first);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fetches several rectangles as a single union query", async () => {
+    let body = "";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+        body = decodeURIComponent(String(init?.body));
+        return okJson({ elements: [building] });
+      })
+    );
+    const other = { north: 40.7, south: 40.69, east: -73.9, west: -73.91 };
+    await fetchBuildingsInRects([rect, other]);
+    expect(body.match(/way\[building\]/g)).toHaveLength(2);
+    expect(body).toContain("(way[building]");
   });
 
   it("parses settled-area polygons, dropping the closing node", async () => {

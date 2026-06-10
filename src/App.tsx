@@ -73,6 +73,8 @@ interface CityState {
   /** What the outline was built from (settled-area outlines are a
    * coarser fallback where OSM has no buildings mapped). */
   source?: CitySource;
+  /** OSM stopped responding partway; the rest came from ArcGIS. */
+  mixedSources?: boolean;
 }
 
 interface EruvCityState {
@@ -207,6 +209,7 @@ export default function App() {
           capped: result.capped,
           fetchError: result.fetchError,
           source: result.source,
+          mixedSources: result.mixedSources,
         });
         setProgress(null);
       })
@@ -592,7 +595,9 @@ export default function App() {
                   <p className="warning">
                     ⚠ Building data stopped loading partway (
                     {cityState.fetchError}) — the city boundary is based on
-                    what was fetched and may be incomplete.{" "}
+                    what was fetched and may be incomplete, so the techum may
+                    be understated. Retry <b>resumes</b> from the data
+                    already loaded.{" "}
                     <button
                       className="link-button"
                       onClick={() => setRetryNonce((n) => n + 1)}
@@ -601,6 +606,16 @@ export default function App() {
                     </button>
                   </p>
                 )}
+                {cityState.status === "done" &&
+                  !cityState.fetchError &&
+                  cityState.mixedSources && (
+                    <p className="muted">
+                      OpenStreetMap stopped responding partway through the
+                      analysis — the remaining area was filled in from the
+                      USA Structures dataset (FEMA/Microsoft, via ArcGIS),
+                      so the city was still captured in full.
+                    </p>
+                  )}
                 {noCityFound && cityState.status === "done" && !manualCityBounds && (
                   <div className="warning">
                     ⚠ No buildings were found near this address in any
