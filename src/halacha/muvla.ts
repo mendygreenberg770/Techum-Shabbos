@@ -27,6 +27,20 @@ export interface MuvlaBump {
   city: Bounds;
 }
 
+/** Whether `inner` lies entirely within `outer` (half-meter tolerance). */
+export function rectContainedIn(inner: Bounds, outer: Bounds): boolean {
+  const midLat = (outer.north + outer.south) / 2;
+  const { perDegLat, perDegLng } = metersPerDegree(midLat);
+  const epsLat = 0.5 / perDegLat;
+  const epsLng = 0.5 / perDegLng;
+  return (
+    inner.north <= outer.north + epsLat &&
+    inner.south >= outer.south - epsLat &&
+    inner.east <= outer.east + epsLng &&
+    inner.west >= outer.west - epsLng
+  );
+}
+
 export function computeMuvlaBumps(
   homeBase: Bounds,
   techum: Bounds,
@@ -41,12 +55,7 @@ export function computeMuvlaBumps(
 
   const bumps: MuvlaBump[] = [];
   for (const city of cities) {
-    const contained =
-      city.north <= techum.north + epsLat &&
-      city.south >= techum.south - epsLat &&
-      city.east <= techum.east + epsLng &&
-      city.west >= techum.west - epsLng;
-    if (!contained) continue;
+    if (!rectContainedIn(city, techum)) continue;
 
     if (city.west >= homeBase.east) {
       const consumed = (city.west - homeBase.east) * perDegLng;

@@ -53,8 +53,9 @@ npm install
 npm run dev
 ```
 
-Open the printed URL. The app will ask for a **Google Maps API key** (stored
-in your browser's localStorage), or you can bake one in at build time:
+Open the printed URL. A default **Google Maps API key** is bundled (restrict
+it to your domains in the Google Cloud console!); you can override it in the
+app (stored in your browser's localStorage) or at build time:
 
 ```bash
 VITE_GOOGLE_MAPS_API_KEY=your-key npm run dev

@@ -10,6 +10,8 @@ interface Props {
   techumBumps: Bounds[];
   /** Cities swallowed within the techum (thin green outline). */
   swallowedCities: Bounds[];
+  /** Cities the techum line ends inside of — kalsa midaso (red outline). */
+  partialCities: Bounds[];
   /** The other karpef opinion's techum, for comparison (thin gray). */
   altTechumBounds: Bounds | null;
   /** The squared city (green); editable when cityEditable is set. */
@@ -22,10 +24,15 @@ interface Props {
   /** Eiruv planner overlays. */
   destination: SelectedPlace | null;
   feasibleRegion: Bounds | null;
+  /** Corner-rotation kula: placement region ring + destination circle. */
+  feasibleRing: LatLng[] | null;
+  feasibleCircle: { center: LatLng; radiusM: number } | null;
   eruvSpot: LatLng | null;
   eruvPlacingActive: boolean;
   onEruvSpotChange: (p: LatLng) => void;
   newTechumBounds: Bounds | null;
+  /** Corner-rotation kula: the new techum as a rotated diamond. */
+  newTechumRing: LatLng[] | null;
   newTechumBumps: Bounds[];
   gained: Bounds[];
   lost: Bounds[];
@@ -51,6 +58,23 @@ const SWALLOWED_STYLE: google.maps.RectangleOptions = {
   strokeOpacity: 0.8,
   strokeWeight: 1,
   fillOpacity: 0,
+  clickable: false,
+};
+
+const PARTIAL_CITY_STYLE: google.maps.RectangleOptions = {
+  strokeColor: "#c01c28",
+  strokeOpacity: 0.85,
+  strokeWeight: 1.5,
+  fillOpacity: 0,
+  clickable: false,
+};
+
+const FEASIBLE_POLY_STYLE: google.maps.PolygonOptions = {
+  strokeColor: "#b48800",
+  strokeOpacity: 0.9,
+  strokeWeight: 1.5,
+  fillColor: "#f5c211",
+  fillOpacity: 0.1,
   clickable: false,
 };
 
@@ -128,6 +152,10 @@ export default function MapView(props: Props) {
   const circleRef = useRef<google.maps.Circle | null>(null);
   const bumpPool = useRef<google.maps.Rectangle[]>([]);
   const swallowedPool = useRef<google.maps.Rectangle[]>([]);
+  const partialPool = useRef<google.maps.Rectangle[]>([]);
+  const feasibleRingRef = useRef<google.maps.Polygon | null>(null);
+  const feasibleCircleRef = useRef<google.maps.Circle | null>(null);
+  const diamondRef = useRef<google.maps.Polygon | null>(null);
   const newBumpPool = useRef<google.maps.Rectangle[]>([]);
   const gainedPool = useRef<google.maps.Rectangle[]>([]);
   const lostPool = useRef<google.maps.Rectangle[]>([]);
@@ -169,6 +197,7 @@ export default function MapView(props: Props) {
     techumBounds,
     techumBumps,
     swallowedCities,
+    partialCities,
     altTechumBounds,
     cityBounds,
     hull,
@@ -176,8 +205,11 @@ export default function MapView(props: Props) {
     showRadiusCircle,
     destination,
     feasibleRegion,
+    feasibleRing,
+    feasibleCircle,
     eruvSpot,
     newTechumBounds,
+    newTechumRing,
     newTechumBumps,
     gained,
     lost,
@@ -203,6 +235,7 @@ export default function MapView(props: Props) {
     techumRef.current.setBounds(toGBounds(techumBounds));
     syncRects(bumpPool.current, map, techumBumps, TECHUM_STYLE);
     syncRects(swallowedPool.current, map, swallowedCities, SWALLOWED_STYLE);
+    syncRects(partialPool.current, map, partialCities, PARTIAL_CITY_STYLE);
 
     // Alternate karpef-opinion techum (thin gray, no fill)
     if (!altRef.current) {
@@ -345,6 +378,46 @@ export default function MapView(props: Props) {
       eruvMarkerRef.current.setMap(map);
     } else {
       eruvMarkerRef.current.setMap(null);
+    }
+
+    // Corner-rotation kula overlays: placement ring, destination
+    // circle, and the diamond new techum.
+    if (!feasibleRingRef.current) {
+      feasibleRingRef.current = new google.maps.Polygon(FEASIBLE_POLY_STYLE);
+    }
+    if (feasibleRing && feasibleRing.length >= 3) {
+      feasibleRingRef.current.setPath(feasibleRing);
+      feasibleRingRef.current.setMap(map);
+    } else {
+      feasibleRingRef.current.setMap(null);
+    }
+
+    if (!feasibleCircleRef.current) {
+      feasibleCircleRef.current = new google.maps.Circle(FEASIBLE_POLY_STYLE);
+    }
+    if (feasibleCircle) {
+      feasibleCircleRef.current.setCenter(feasibleCircle.center);
+      feasibleCircleRef.current.setRadius(feasibleCircle.radiusM);
+      feasibleCircleRef.current.setMap(map);
+    } else {
+      feasibleCircleRef.current.setMap(null);
+    }
+
+    if (!diamondRef.current) {
+      diamondRef.current = new google.maps.Polygon({
+        strokeColor: "#9141ac",
+        strokeOpacity: 0.9,
+        strokeWeight: 2.5,
+        fillColor: "#9141ac",
+        fillOpacity: 0.07,
+        clickable: false,
+      });
+    }
+    if (newTechumRing && newTechumRing.length >= 3) {
+      diamondRef.current.setPath(newTechumRing);
+      diamondRef.current.setMap(map);
+    } else {
+      diamondRef.current.setMap(null);
     }
 
     if (!newTechumRef.current) {

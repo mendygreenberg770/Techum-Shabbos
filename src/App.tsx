@@ -5,12 +5,21 @@ import SearchBox from "./components/SearchBox";
 import EruvChecklist from "./components/EruvChecklist";
 import type { CityDetection } from "./city/cluster";
 import { detectCityExpanding, type ExpandProgress } from "./city/expand";
-import { placeEruv, planEruv } from "./halacha/eruv";
-import { computeMuvlaBumps } from "./halacha/muvla";
+import {
+  bearingDeg,
+  diamondRing,
+  distanceToRectM,
+  placeEruv,
+  planEruv,
+  rotatedFeasible,
+  roundedRectRing,
+} from "./halacha/eruv";
+import { computeMuvlaBumps, rectContainedIn } from "./halacha/muvla";
 import {
   distanceMeters,
   expandBounds,
   pointBounds,
+  rectIntersect,
   rectUnion,
   techumFromPoint,
   type Bounds,
@@ -28,6 +37,9 @@ import type { SelectedPlace } from "./maps/geocode";
 
 const STORAGE_KEY = "techum.gmapsApiKey";
 const ENV_KEY = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined) || null;
+// Maps JavaScript API keys are designed to be embedded client-side;
+// restrict this key to your domains in the Google Cloud console.
+const DEFAULT_KEY = "AIzaSyDtOQylrdusufl4zsRVoLr9SngVGXoUzEs";
 
 /** Beyond this distance from the nearest building, treat the address
  * as a lone dwelling rather than part of the detected cluster. */
@@ -55,7 +67,7 @@ export default function App() {
   // Changing the key always goes through a page reload (the Maps script
   // can only be loaded once per page), so this never needs a setter.
   const [apiKey] = useState<string | null>(
-    () => ENV_KEY ?? localStorage.getItem(STORAGE_KEY)
+    () => ENV_KEY ?? localStorage.getItem(STORAGE_KEY) ?? DEFAULT_KEY
   );
   const [authFailed, setAuthFailed] = useState(false);
   const [mapsReady, setMapsReady] = useState(false);
@@ -75,6 +87,7 @@ export default function App() {
   const [eruvOn, setEruvOn] = useState(false);
   const [destination, setDestination] = useState<SelectedPlace | null>(null);
   const [eruvSpot, setEruvSpot] = useState<LatLng | null>(null);
+  const [rotationOn, setRotationOn] = useState(false);
 
   useEffect(() => {
     if (!apiKey) return;
@@ -165,6 +178,15 @@ export default function App() {
           )
         : null;
 
+    // Kalsa midaso: neighboring cities the techum line ends inside of
+    // (overlapping but not fully swallowed) — one may walk only up to
+    // the line there; no 4-amos credit.
+    const partialCities = usingCity
+      ? otherCities.filter(
+          (c) => rectIntersect(c, techum) !== null && !rectContainedIn(c, techum)
+        )
+      : [];
+
     const plan =
       eruvOn && destination ? planEruv(techum, bumps, destination.location) : null;
     const allCities =
@@ -174,18 +196,49 @@ export default function App() {
         ? placeEruv(eruvSpot, destination.location, techum, plan.feasibleRegion, allCities)
         : null;
 
+    // Corner-rotation kula (chabad.org #4494176): the squaring may be
+    // plotted to one's preference, so a corner can be aimed at the
+    // destination — reach extends to 2,000·√2 amos for both placing
+    // the eiruv beyond the city line and the new techum around it.
+    const rotated =
+      rotationOn && plan && !plan.destinationInHomeTechum && destination
+        ? {
+            placeRing: roundedRectRing(base, TECHUM_CORNER_M),
+            destCircle: { center: destination.location, radiusM: TECHUM_CORNER_M },
+            diamond:
+              eruvSpot &&
+              diamondRing(
+                eruvSpot,
+                TECHUM_CORNER_M,
+                bearingDeg(eruvSpot, destination.location)
+              ),
+            inFeasible: eruvSpot
+              ? rotatedFeasible(eruvSpot, base, destination.location)
+              : false,
+            destCovered: eruvSpot
+              ? distanceMeters(eruvSpot, destination.location) <= TECHUM_CORNER_M
+              : false,
+            reachable:
+              distanceToRectM(destination.location, base) <= 2 * TECHUM_CORNER_M,
+          }
+        : null;
+
     let fit = techum;
     for (const b of bumps) fit = rectUnion(fit, b.bounds);
     if (plan && destination && !plan.destinationInHomeTechum) {
       fit = rectUnion(fit, techumFromPoint(destination.location));
+      if (rotated) {
+        fit = rectUnion(fit, expandBounds(pointBounds(destination.location), TECHUM_CORNER_M));
+        fit = rectUnion(fit, expandBounds(base, TECHUM_CORNER_M));
+      }
     }
     if (placement) {
       fit = rectUnion(fit, placement.newTechum);
       for (const b of placement.newBumps) fit = rectUnion(fit, b.bounds);
     }
 
-    return { techum, altTechum, bumps, plan, placement, fit };
-  }, [place, usingCity, cityBounds, karpefOn, detection, eruvOn, destination, eruvSpot]);
+    return { techum, altTechum, bumps, partialCities, plan, placement, rotated, fit };
+  }, [place, usingCity, cityBounds, karpefOn, detection, eruvOn, destination, eruvSpot, rotationOn]);
 
   if (!apiKey || authFailed) {
     return (
@@ -204,7 +257,14 @@ export default function App() {
   const truncated = detection?.truncatedSides ?? [];
   const plan = view?.plan ?? null;
   const placement = view?.placement ?? null;
-  const placingEruv = !!(plan && !plan.destinationInHomeTechum && plan.feasibleRegion);
+  const rotated = view?.rotated ?? null;
+  const partialCities = view?.partialCities ?? [];
+  const eruvReachable = !!(plan?.feasibleRegion || (rotated && rotated.reachable));
+  const placingEruv = !!(plan && !plan.destinationInHomeTechum && eruvReachable);
+  const spotOk = rotated ? rotated.inFeasible : placement?.inFeasibleRegion ?? false;
+  const destOk = rotated
+    ? rotated.destCovered && rotated.inFeasible
+    : placement?.destinationCovered ?? false;
   const destDistanceM =
     place && destination
       ? distanceMeters(place.location, destination.location)
@@ -312,6 +372,17 @@ export default function App() {
                     swallowed within the techum and count as only 4 amos — the
                     techum extends beyond {view.bumps.length === 1 ? "it" : "them"}{" "}
                     (blue extensions; SA HaRav 408:1).
+                  </p>
+                )}
+                {usingCity && partialCities.length > 0 && (
+                  <p className="warning">
+                    ⚠ The techum line ends <b>inside</b>{" "}
+                    {partialCities.length === 1
+                      ? "a neighboring built-up area"
+                      : `${partialCities.length} neighboring built-up areas`}{" "}
+                    (outlined red). You may walk only up to the line there —
+                    a city counts as 4 amos only when it lies <i>entirely</i>{" "}
+                    within the techum (SA HaRav 408:1).
                   </p>
                 )}
 
@@ -424,40 +495,71 @@ export default function App() {
                       </p>
                     )}
 
-                    {plan && !plan.destinationInHomeTechum && !plan.feasibleRegion && (
+                    {plan && !plan.destinationInHomeTechum && (
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={rotationOn}
+                          onChange={(e) => setRotationOn(e.target.checked)}
+                        />
+                        Corner kula: plot the squaring to your preference,
+                        aiming a corner ("diamond") at the destination — reach
+                        extends to 2,000·√2 amos ≈ {Math.round(TECHUM_CORNER_M)}{" "}
+                        m per direction (chabad.org #4494176). A kula — confirm
+                        with your rav.
+                      </label>
+                    )}
+
+                    {plan && !plan.destinationInHomeTechum && !eruvReachable && (
                       <p className="error">
                         ✗ Out of reach: an eiruv techumin moves the techum at
-                        most 2,000 amos further (up to 4,000 amos = 1,920 m
-                        total in one direction). No placement can cover this
-                        destination.
+                        most 2,000 amos further (
+                        {rotationOn
+                          ? `up to ${Math.round(2 * TECHUM_CORNER_M).toLocaleString()} m total with the corner kula`
+                          : "up to 4,000 amos = 1,920 m total in one direction"}
+                        ). No placement can cover this destination.
+                        {!rotationOn &&
+                          " You can try the corner kula above to extend the reach."}
                       </p>
                     )}
 
                     {placingEruv && (
                       <>
                         <p className="muted">
-                          Click on the map inside the <b>yellow region</b> (or
-                          drag the green eiruv marker) to choose where the
-                          eiruv will rest. The yellow region is within your
-                          current techum <i>and</i> close enough for the new
-                          techum to cover the destination.
+                          {rotationOn ? (
+                            <>
+                              Click on the map (or drag the green eiruv
+                              marker) where the <b>yellow shapes overlap</b>:
+                              within corner reach of the city line <i>and</i>{" "}
+                              of the destination. The new techum is drawn as a
+                              diamond aimed at the destination.
+                            </>
+                          ) : (
+                            <>
+                              Click on the map inside the <b>yellow region</b>{" "}
+                              (or drag the green eiruv marker) to choose where
+                              the eiruv will rest. The yellow region is within
+                              your current techum <i>and</i> close enough for
+                              the new techum to cover the destination.
+                            </>
+                          )}
                         </p>
-                        {placement && (
+                        {eruvSpot && (
                           <>
-                            {!placement.inFeasibleRegion && (
+                            {!spotOk && (
                               <p className="warning">
                                 ⚠ This spot is outside the feasible region —
                                 either beyond your current techum (you may not
                                 reach it) or too far from the destination.
                               </p>
                             )}
-                            {placement.inFeasibleRegion &&
-                              (placement.destinationCovered ? (
+                            {spotOk &&
+                              (destOk ? (
                                 <p className="success">
                                   ✓ With the eiruv here, the destination is
-                                  within the new techum (purple). The red area
-                                  on the home side is <b>lost</b>; the green
-                                  area is gained.
+                                  within the new techum (purple).
+                                  {!rotationOn &&
+                                    " The red area on the home side is lost; the green area is gained."}
                                 </p>
                               ) : (
                                 <p className="warning">
@@ -465,7 +567,7 @@ export default function App() {
                                   spot — move the eiruv closer to it.
                                 </p>
                               ))}
-                            {placement.newBumps.length > 0 && (
+                            {!rotationOn && placement && placement.newBumps.length > 0 && (
                               <p className="muted">
                                 A city fully swallowed within the new techum
                                 (e.g., your own city) counts as only 4 amos —
@@ -474,11 +576,13 @@ export default function App() {
                               </p>
                             )}
                             <p className="muted">
-                              Eiruv spot: {eruvSpot!.lat.toFixed(5)},{" "}
-                              {eruvSpot!.lng.toFixed(5)}. The eiruv is treated
+                              Eiruv spot: {eruvSpot.lat.toFixed(5)},{" "}
+                              {eruvSpot.lng.toFixed(5)}. The eiruv is treated
                               as a bare point; the bonus of an eiruv resting
                               inside another city is not yet credited (a
                               stringency).
+                              {rotationOn &&
+                                " With the corner kula, gained/lost shading and 4-amos extensions are not drawn — the diamond itself is the new techum."}
                             </p>
                           </>
                         )}
@@ -497,6 +601,7 @@ export default function App() {
                 <li><span className="swatch" style={{ background: "#26a269" }} /> Squared city</li>
                 <li><span className="swatch" style={{ background: "#1a5fb4" }} /> Techum (incl. muvla extensions)</li>
                 <li><span className="swatch" style={{ background: "#5e5c64" }} /> Other karpef opinion</li>
+                <li><span className="swatch" style={{ background: "#c01c28" }} /> City the techum ends inside (kalsa midaso)</li>
                 <li><span className="swatch" style={{ background: "#f5c211" }} /> Eiruv feasible region</li>
                 <li><span className="swatch" style={{ background: "#9141ac" }} /> New techum (with eiruv)</li>
                 <li><span className="swatch" style={{ background: "#2ec27e" }} /> Area gained</li>
@@ -538,17 +643,21 @@ export default function App() {
             cityEditable={adjusting}
             onCityBoundsChange={(b) => setManualCityBounds(b)}
             showRadiusCircle={mode === "point" && showRadiusCircle}
+            partialCities={partialCities}
             destination={eruvOn ? destination : null}
-            feasibleRegion={placingEruv ? plan!.feasibleRegion : null}
+            feasibleRegion={placingEruv && !rotated ? plan!.feasibleRegion : null}
+            feasibleRing={placingEruv && rotated ? rotated.placeRing : null}
+            feasibleCircle={placingEruv && rotated ? rotated.destCircle : null}
             eruvSpot={placingEruv ? eruvSpot : null}
             eruvPlacingActive={placingEruv}
             onEruvSpotChange={setEruvSpot}
-            newTechumBounds={placement?.newTechum ?? null}
-            newTechumBumps={placement?.newBumps.map((b) => b.bounds) ?? []}
-            gained={placement?.gained ?? []}
-            lost={placement?.lost ?? []}
+            newTechumBounds={!rotated ? placement?.newTechum ?? null : null}
+            newTechumRing={placingEruv && rotated ? rotated.diamond || null : null}
+            newTechumBumps={!rotated ? placement?.newBumps.map((b) => b.bounds) ?? [] : []}
+            gained={!rotated ? placement?.gained ?? [] : []}
+            lost={!rotated ? placement?.lost ?? [] : []}
             fitBounds={view?.fit ?? null}
-            fitKey={`${place?.address ?? ""}|${mode}|${usingCity ? "city" : "point"}|${limitKey}|${eruvOn}|${destination?.address ?? ""}|${placement ? "placed" : ""}`}
+            fitKey={`${place?.address ?? ""}|${mode}|${usingCity ? "city" : "point"}|${limitKey}|${eruvOn}|${destination?.address ?? ""}|${placement ? "placed" : ""}|${rotationOn}`}
           />
         )}
       </main>

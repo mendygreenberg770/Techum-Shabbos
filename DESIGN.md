@@ -142,7 +142,44 @@ React + TypeScript (Vite)
 | 3 | Eiruv techumin planner: feasible region, new techum, gained/lost overlay, checklist + nusach |
 | 4 | City-as-4-amos logic for the eiruv (408:1), saved locations, shareable links, PWA/mobile polish |
 
-## 6. Open halachic questions (to confirm with a rav before they're encoded)
+## 6. Rules adopted from "A Practical Application of Techum Shabbat"
+
+From the chabad.org article (#4494176) on walking between Borehamwood and
+Edgware (the site blocks automated access; the substance below was
+reconstructed from indexed excerpts — the reader comments could not be
+retrieved):
+
+1. **Squaring method**: a town is squared by identifying the furthest
+   houses in each of the four directions and drawing a rectangle around
+   them; open space inside the rectangle is treated as if full of
+   dwellings. *(Matches the app's bounding-rectangle model.)*
+2. **70 amos (~35 m)** joins a house to the town. *(Matches; the app uses
+   Reb Chaim Naeh's exact 33.92 m.)*
+3. **2,000 amos ≈ 960 m**, and squaring the techum adds ~40% at the
+   corners. *(Matches: 2,000·√2 ≈ 2,828 amos ≈ 1,357.6 m; the article
+   approximates 1,344 m.)*
+4. **Corner-rotation kula**: for a personal eiruv techumin, one may plot
+   the squaring to one's own preference — rotating the square to a
+   "diamond" aims its corner at the desired direction, allowing the eiruv
+   to be placed up to ~2,000·√2 amos beyond the city line, and likewise
+   extending the new techum's reach toward the destination.
+   *(Implemented as an opt-in toggle, labeled as a kula to confirm with a
+   rav.)*
+5. **Eiruv techumin basics**: food for two meals (e.g., a loaf of bread)
+   deposited before Shabbos within the 2,000-amah range; its location
+   becomes one's residence, giving 2,000 amos around it. *(Matches the
+   planner and checklist.)*
+6. **Practical-psak caution**: despite the geometry appearing workable,
+   the London Beth Din ruled there is currently no halachically
+   permissible way to walk Borehamwood→Edgware. *(Added to the planner's
+   checklist as a standing caution: an app cannot replace the local rav.)*
+
+Related din implemented alongside: **kalsa midaso** — when the techum
+line ends *inside* a neighboring city (not fully swallowed), one may walk
+only up to the line; the 4-amos credit applies only to a city entirely
+within the techum. The app outlines such cities in red with a warning.
+
+## 7. Open halachic questions (to confirm with a rav before they're encoded)
 
 1. **Karpef for a single city** — machlokes in 398:5; what does SA HaRav 398
    rule, and should the default line include it? (App will support showing

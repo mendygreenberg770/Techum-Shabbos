@@ -45,6 +45,14 @@ export default function EruvChecklist() {
           present at the spot at bein hashmashos with intent to acquire one's
           shevisa there — no food or brachah is needed.
         </li>
+        <li>
+          <b>A practical caution:</b> even where the map shows a feasible
+          route, the local rabbanim may rule that it cannot be relied on in
+          practice (for example, the London Beth Din's position on walking
+          between Borehamwood and Edgware, the case discussed in the article
+          this planner draws on). Always confirm the route, the spot's
+          accessibility, and its halachic validity with your rav.
+        </li>
       </ul>
     </details>
   );

@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { placeEruv, planEruv } from "./eruv";
+import {
+  bearingDeg,
+  diamondRing,
+  distanceToRectM,
+  placeEruv,
+  planEruv,
+  rotatedFeasible,
+  roundedRectRing,
+} from "./eruv";
+import { TECHUM_CORNER_M } from "./shiurim";
 import {
   expandBounds,
   metersPerDegree,
@@ -85,5 +94,45 @@ describe("placeEruv", () => {
     expect(placement.newBumps[0].side).toBe("east");
     // Destination at 1900 is beyond the plain square (1760) but inside the bump.
     expect(placement.destinationCovered).toBe(true);
+  });
+});
+
+describe("corner-rotation kula (chabad.org #4494176)", () => {
+  // Home city: 100 m square around C.
+  const homeBase = rectM(-50, -50, 50, 50);
+
+  it("measures distance to the squared city boundary", () => {
+    expect(distanceToRectM(at(0, 0), homeBase)).toBe(0);
+    expect(distanceToRectM(at(1050, 0), homeBase)).toBeCloseTo(1000, 0);
+    expect(distanceToRectM(at(1050, 1050), homeBase)).toBeCloseTo(1000 * Math.SQRT2, 0);
+  });
+
+  it("allows placing the eiruv up to 2,000·√2 amos beyond the city line", () => {
+    // The article: rotating the square to a diamond allows an eiruv up
+    // to ~1,344 m (their 40% approximation of 960·√2 ≈ 1,357.6 m)
+    // beyond the city line.
+    const dest = at(2500, 0);
+    expect(rotatedFeasible(at(1344 + 50, 0), homeBase, dest)).toBe(true);
+    expect(rotatedFeasible(at(1400 + 50, 0), homeBase, dest)).toBe(false);
+    // Within reach of the city but too far from the destination:
+    expect(rotatedFeasible(at(900, 0), homeBase, at(2500, 0))).toBe(false);
+  });
+
+  it("builds a diamond with a corner aimed at the destination", () => {
+    const eruv = at(0, 0);
+    const dest = at(2000, 0); // due east
+    const ring = diamondRing(eruv, TECHUM_CORNER_M, bearingDeg(eruv, dest));
+    expect(ring).toHaveLength(4);
+    // First corner points due east at the corner distance.
+    expect((ring[0].lng - eruv.lng) * perDegLng).toBeCloseTo(TECHUM_CORNER_M, 0);
+    expect((ring[0].lat - eruv.lat) * perDegLat).toBeCloseTo(0, 0);
+  });
+
+  it("builds a rounded-rect placement region around the city", () => {
+    const ring = roundedRectRing(homeBase, TECHUM_CORNER_M, 8);
+    expect(ring.length).toBe(4 * 9);
+    // Due east of the city's east edge, the ring reaches edge + corner distance.
+    const maxLng = Math.max(...ring.map((p) => (p.lng - C.lng) * perDegLng));
+    expect(maxLng).toBeCloseTo(50 + TECHUM_CORNER_M, 0);
   });
 });
