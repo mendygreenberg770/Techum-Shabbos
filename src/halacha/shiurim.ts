@@ -27,3 +27,9 @@ export const TWO_CITIES_JOIN_M = 2 * KARPEF_M; // 67.84 m
 
 /** Distance to the techum corner along the diagonal (2000 * sqrt(2) amos). */
 export const TECHUM_CORNER_M = TECHUM_M * Math.SQRT2; // ~1357.6 m
+
+/**
+ * Four amos: what crossing a fully-swallowed city (ir muvla'as bitoch
+ * hatechum) consumes of the 2,000-amah measure (SA HaRav 408:1).
+ */
+export const FOUR_AMOS_M = 4 * AMAH_M; // 1.92 m

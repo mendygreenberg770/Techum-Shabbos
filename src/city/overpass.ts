@@ -1,4 +1,4 @@
-import type { LatLng } from "../halacha/geometry";
+import type { Bounds, LatLng } from "../halacha/geometry";
 
 const ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
@@ -7,25 +7,31 @@ const ENDPOINTS = [
 
 interface OverpassElement {
   type: string;
-  geometry?: { lat: number; lon: number }[];
+  id: number;
+  bounds?: { minlat: number; minlon: number; maxlat: number; maxlon: number };
+}
+
+export interface FetchedBuilding {
+  id: number;
+  /** Building outline as its bounding rectangle (4 corners). */
+  ring: LatLng[];
 }
 
 /**
- * Fetch building footprints within a radius of a point from
- * OpenStreetMap via the Overpass API. Returns one polygon (ring of
- * vertices) per building.
+ * Fetch buildings inside a lat/lng rectangle from OpenStreetMap via the
+ * Overpass API. To keep city-scale downloads feasible, only each
+ * building's bounding box is fetched (`out ids bb`), not its full
+ * outline — roughly 10x smaller. The bbox shares the footprint's
+ * extremes, so the squared-city bounds are unaffected; gaps between
+ * diagonal buildings can be slightly understated (joining a bit more
+ * than the strict footprint would — noted in DESIGN.md).
  *
- * Known limitation: multipolygon relation buildings are skipped (only
- * simple closed ways are fetched); these are rare for dwellings.
+ * Known limitation: multipolygon relation buildings are skipped; these
+ * are rare for dwellings.
  */
-export async function fetchBuildings(
-  center: LatLng,
-  radiusM: number
-): Promise<LatLng[][]> {
-  const query =
-    `[out:json][timeout:90];` +
-    `way[building](around:${Math.round(radiusM)},${center.lat},${center.lng});` +
-    `out geom qt;`;
+export async function fetchBuildingsInRect(rect: Bounds): Promise<FetchedBuilding[]> {
+  const bbox = `${rect.south},${rect.west},${rect.north},${rect.east}`;
+  const query = `[out:json][timeout:120];way[building](${bbox});out ids bb qt;`;
 
   let lastError: Error = new Error("No Overpass endpoint available");
   for (const endpoint of ENDPOINTS) {
@@ -40,18 +46,19 @@ export async function fetchBuildings(
       }
       const data = (await res.json()) as { elements?: OverpassElement[] };
       return (data.elements ?? [])
-        .filter((el) => el.type === "way" && el.geometry && el.geometry.length >= 3)
+        .filter((el) => el.type === "way" && el.bounds)
         .map((el) => {
-          const ring = el.geometry!.map((g) => ({ lat: g.lat, lng: g.lon }));
-          // Closed ways repeat the first vertex at the end; drop it.
-          const first = ring[0];
-          const last = ring[ring.length - 1];
-          if (ring.length > 3 && first.lat === last.lat && first.lng === last.lng) {
-            ring.pop();
-          }
-          return ring;
-        })
-        .filter((ring) => ring.length >= 3);
+          const b = el.bounds!;
+          return {
+            id: el.id,
+            ring: [
+              { lat: b.minlat, lng: b.minlon },
+              { lat: b.minlat, lng: b.maxlon },
+              { lat: b.maxlat, lng: b.maxlon },
+              { lat: b.maxlat, lng: b.minlon },
+            ],
+          };
+        });
     } catch (e) {
       lastError = e instanceof Error ? e : new Error(String(e));
     }

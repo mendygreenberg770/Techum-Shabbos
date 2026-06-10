@@ -84,6 +84,52 @@ export function distanceMeters(a: LatLng, b: LatLng): number {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
+/** Zero-size bounds at a point (a lone person/eiruv spot before squaring). */
+export function pointBounds(p: LatLng): Bounds {
+  return { north: p.lat, south: p.lat, east: p.lng, west: p.lng };
+}
+
+/** Intersection of two north-aligned rectangles, or null when disjoint. */
+export function rectIntersect(a: Bounds, b: Bounds): Bounds | null {
+  const r: Bounds = {
+    north: Math.min(a.north, b.north),
+    south: Math.max(a.south, b.south),
+    east: Math.min(a.east, b.east),
+    west: Math.max(a.west, b.west),
+  };
+  return r.north > r.south && r.east > r.west ? r : null;
+}
+
+/** Smallest north-aligned rectangle containing both rectangles. */
+export function rectUnion(a: Bounds, b: Bounds): Bounds {
+  return {
+    north: Math.max(a.north, b.north),
+    south: Math.min(a.south, b.south),
+    east: Math.max(a.east, b.east),
+    west: Math.min(a.west, b.west),
+  };
+}
+
+/** a minus b, as up to four disjoint rectangles. */
+export function rectDifference(a: Bounds, b: Bounds): Bounds[] {
+  const inter = rectIntersect(a, b);
+  if (!inter) return [a];
+  const out: Bounds[] = [];
+  if (inter.north < a.north) {
+    out.push({ north: a.north, south: inter.north, east: a.east, west: a.west });
+  }
+  if (inter.south > a.south) {
+    out.push({ north: inter.south, south: a.south, east: a.east, west: a.west });
+  }
+  if (inter.west > a.west) {
+    out.push({ north: inter.north, south: inter.south, east: inter.west, west: a.west });
+  }
+  if (inter.east < a.east) {
+    out.push({ north: inter.north, south: inter.south, east: a.east, west: inter.east });
+  }
+  return out;
+}
+
 /** Whether a point lies within a north-aligned rectangle. */
 export function boundsContain(bounds: Bounds, p: LatLng): boolean {
   return (

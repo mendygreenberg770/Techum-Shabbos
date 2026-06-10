@@ -5,8 +5,11 @@ import type { SelectedPlace } from "../maps/geocode";
 
 interface Props {
   place: SelectedPlace | null;
-  /** The techum to display (blue). */
+  /** The techum to display (blue) and its muvla extensions. */
   techumBounds: Bounds | null;
+  techumBumps: Bounds[];
+  /** Cities swallowed within the techum (thin green outline). */
+  swallowedCities: Bounds[];
   /** The other karpef opinion's techum, for comparison (thin gray). */
   altTechumBounds: Bounds | null;
   /** The squared city (green); editable when cityEditable is set. */
@@ -16,12 +19,65 @@ interface Props {
   cityEditable: boolean;
   onCityBoundsChange: (b: Bounds) => void;
   showRadiusCircle: boolean;
-  /** Refit the viewport when this changes. */
+  /** Eiruv planner overlays. */
+  destination: SelectedPlace | null;
+  feasibleRegion: Bounds | null;
+  eruvSpot: LatLng | null;
+  eruvPlacingActive: boolean;
+  onEruvSpotChange: (p: LatLng) => void;
+  newTechumBounds: Bounds | null;
+  newTechumBumps: Bounds[];
+  gained: Bounds[];
+  lost: Bounds[];
+  /** Viewport: refit to fitBounds when fitKey changes. */
+  fitBounds: Bounds | null;
   fitKey: string;
 }
 
 // 770 Eastern Parkway as the initial view.
 const DEFAULT_CENTER = { lat: 40.669, lng: -73.9428 };
+
+const TECHUM_STYLE: google.maps.RectangleOptions = {
+  strokeColor: "#1a5fb4",
+  strokeOpacity: 0.9,
+  strokeWeight: 2.5,
+  fillColor: "#1a5fb4",
+  fillOpacity: 0.08,
+  clickable: false,
+};
+
+const SWALLOWED_STYLE: google.maps.RectangleOptions = {
+  strokeColor: "#26a269",
+  strokeOpacity: 0.8,
+  strokeWeight: 1,
+  fillOpacity: 0,
+  clickable: false,
+};
+
+const NEW_TECHUM_STYLE: google.maps.RectangleOptions = {
+  strokeColor: "#9141ac",
+  strokeOpacity: 0.9,
+  strokeWeight: 2.5,
+  fillColor: "#9141ac",
+  fillOpacity: 0.07,
+  clickable: false,
+};
+
+const GAINED_STYLE: google.maps.RectangleOptions = {
+  strokeOpacity: 0,
+  strokeWeight: 0,
+  fillColor: "#2ec27e",
+  fillOpacity: 0.16,
+  clickable: false,
+};
+
+const LOST_STYLE: google.maps.RectangleOptions = {
+  strokeOpacity: 0,
+  strokeWeight: 0,
+  fillColor: "#e01b24",
+  fillOpacity: 0.14,
+  clickable: false,
+};
 
 function toGBounds(b: Bounds): google.maps.LatLngBoundsLiteral {
   return { north: b.north, south: b.south, east: b.east, west: b.west };
@@ -37,15 +93,44 @@ function sameBounds(a: Bounds, b: Bounds): boolean {
   );
 }
 
+/** Keep a pool of rectangles in sync with a list of bounds. */
+function syncRects(
+  pool: google.maps.Rectangle[],
+  map: google.maps.Map,
+  list: Bounds[],
+  style: google.maps.RectangleOptions
+): void {
+  while (pool.length < list.length) {
+    pool.push(new google.maps.Rectangle(style));
+  }
+  pool.forEach((rect, i) => {
+    if (i < list.length) {
+      rect.setBounds(toGBounds(list[i]));
+      rect.setMap(map);
+    } else {
+      rect.setMap(null);
+    }
+  });
+}
+
 export default function MapView(props: Props) {
   const divRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const markerRef = useRef<google.maps.Marker | null>(null);
+  const destMarkerRef = useRef<google.maps.Marker | null>(null);
+  const eruvMarkerRef = useRef<google.maps.Marker | null>(null);
   const techumRef = useRef<google.maps.Rectangle | null>(null);
   const altRef = useRef<google.maps.Rectangle | null>(null);
   const cityRef = useRef<google.maps.Rectangle | null>(null);
+  const feasibleRef = useRef<google.maps.Rectangle | null>(null);
+  const newTechumRef = useRef<google.maps.Rectangle | null>(null);
   const hullRef = useRef<google.maps.Polygon | null>(null);
   const circleRef = useRef<google.maps.Circle | null>(null);
+  const bumpPool = useRef<google.maps.Rectangle[]>([]);
+  const swallowedPool = useRef<google.maps.Rectangle[]>([]);
+  const newBumpPool = useRef<google.maps.Rectangle[]>([]);
+  const gainedPool = useRef<google.maps.Rectangle[]>([]);
+  const lostPool = useRef<google.maps.Rectangle[]>([]);
   const lastFitKey = useRef("");
   const appliedCityBounds = useRef<Bounds | null>(null);
   const propsRef = useRef(props);
@@ -58,7 +143,7 @@ export default function MapView(props: Props) {
         "maps"
       )) as google.maps.MapsLibrary;
       if (cancelled || !divRef.current || mapRef.current) return;
-      mapRef.current = new Map(divRef.current, {
+      const map = new Map(divRef.current, {
         center: DEFAULT_CENTER,
         zoom: 13,
         streetViewControl: false,
@@ -66,38 +151,58 @@ export default function MapView(props: Props) {
         mapTypeControl: true,
         clickableIcons: false,
       });
+      map.addListener("click", (e: google.maps.MapMouseEvent) => {
+        const p = propsRef.current;
+        if (p.eruvPlacingActive && e.latLng) {
+          p.onEruvSpotChange({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+        }
+      });
+      mapRef.current = map;
     })();
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const { place, techumBounds, altTechumBounds, cityBounds, hull, cityEditable, showRadiusCircle, fitKey } = props;
+  const {
+    place,
+    techumBounds,
+    techumBumps,
+    swallowedCities,
+    altTechumBounds,
+    cityBounds,
+    hull,
+    cityEditable,
+    showRadiusCircle,
+    destination,
+    feasibleRegion,
+    eruvSpot,
+    newTechumBounds,
+    newTechumBumps,
+    gained,
+    lost,
+    fitBounds,
+    fitKey,
+  } = props;
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !place || !techumBounds) return;
 
-    // Marker
+    // Home marker
     if (!markerRef.current) {
       markerRef.current = new google.maps.Marker({ map });
     }
     markerRef.current.setPosition(place.location);
     markerRef.current.setTitle(place.address);
 
-    // Techum (blue)
+    // Techum (blue) + muvla extensions
     if (!techumRef.current) {
-      techumRef.current = new google.maps.Rectangle({
-        map,
-        strokeColor: "#1a5fb4",
-        strokeOpacity: 0.9,
-        strokeWeight: 2.5,
-        fillColor: "#1a5fb4",
-        fillOpacity: 0.08,
-        clickable: false,
-      });
+      techumRef.current = new google.maps.Rectangle({ map, ...TECHUM_STYLE });
     }
     techumRef.current.setBounds(toGBounds(techumBounds));
+    syncRects(bumpPool.current, map, techumBumps, TECHUM_STYLE);
+    syncRects(swallowedPool.current, map, swallowedCities, SWALLOWED_STYLE);
 
     // Alternate karpef-opinion techum (thin gray, no fill)
     if (!altRef.current) {
@@ -190,18 +295,83 @@ export default function MapView(props: Props) {
     circleRef.current.setRadius(TECHUM_M);
     circleRef.current.setMap(showRadiusCircle ? map : null);
 
-    // Fit the viewport on meaningful changes only (not on manual edits).
-    if (fitKey !== lastFitKey.current) {
+    // --- Eiruv planner overlays ---
+
+    if (!destMarkerRef.current) {
+      destMarkerRef.current = new google.maps.Marker({
+        icon: "https://maps.google.com/mapfiles/ms/icons/blue-dot.png",
+      });
+    }
+    if (destination) {
+      destMarkerRef.current.setPosition(destination.location);
+      destMarkerRef.current.setTitle(`Destination: ${destination.address}`);
+      destMarkerRef.current.setMap(map);
+    } else {
+      destMarkerRef.current.setMap(null);
+    }
+
+    if (!feasibleRef.current) {
+      feasibleRef.current = new google.maps.Rectangle({
+        strokeColor: "#b48800",
+        strokeOpacity: 0.9,
+        strokeWeight: 1.5,
+        fillColor: "#f5c211",
+        fillOpacity: 0.18,
+        clickable: false,
+      });
+    }
+    if (feasibleRegion) {
+      feasibleRef.current.setBounds(toGBounds(feasibleRegion));
+      feasibleRef.current.setMap(map);
+    } else {
+      feasibleRef.current.setMap(null);
+    }
+
+    if (!eruvMarkerRef.current) {
+      eruvMarkerRef.current = new google.maps.Marker({
+        icon: "https://maps.google.com/mapfiles/ms/icons/green-dot.png",
+        draggable: true,
+        title: "Eiruv spot (drag to move)",
+      });
+      eruvMarkerRef.current.addListener("dragend", () => {
+        const pos = eruvMarkerRef.current!.getPosition();
+        if (pos) {
+          propsRef.current.onEruvSpotChange({ lat: pos.lat(), lng: pos.lng() });
+        }
+      });
+    }
+    if (eruvSpot) {
+      eruvMarkerRef.current.setPosition(eruvSpot);
+      eruvMarkerRef.current.setMap(map);
+    } else {
+      eruvMarkerRef.current.setMap(null);
+    }
+
+    if (!newTechumRef.current) {
+      newTechumRef.current = new google.maps.Rectangle(NEW_TECHUM_STYLE);
+    }
+    if (newTechumBounds) {
+      newTechumRef.current.setBounds(toGBounds(newTechumBounds));
+      newTechumRef.current.setMap(map);
+    } else {
+      newTechumRef.current.setMap(null);
+    }
+    syncRects(newBumpPool.current, map, newTechumBounds ? newTechumBumps : [], NEW_TECHUM_STYLE);
+    syncRects(gainedPool.current, map, gained, GAINED_STYLE);
+    syncRects(lostPool.current, map, lost, LOST_STYLE);
+
+    // Fit the viewport on meaningful changes only (not on drags/edits).
+    if (fitKey !== lastFitKey.current && fitBounds) {
       lastFitKey.current = fitKey;
       map.fitBounds(
         new google.maps.LatLngBounds(
-          { lat: techumBounds.south, lng: techumBounds.west },
-          { lat: techumBounds.north, lng: techumBounds.east }
+          { lat: fitBounds.south, lng: fitBounds.west },
+          { lat: fitBounds.north, lng: fitBounds.east }
         ),
         24
       );
     }
-  }, [place, techumBounds, altTechumBounds, cityBounds, hull, cityEditable, showRadiusCircle, fitKey]);
+  });
 
   return <div ref={divRef} className="map" />;
 }

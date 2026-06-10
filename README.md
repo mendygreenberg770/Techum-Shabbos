@@ -10,33 +10,41 @@ See [DESIGN.md](DESIGN.md) for the full design and roadmap.
 > **Disclaimer:** this tool is an aid for learning and planning only.
 > Consult a rav before relying on any boundary or eiruv it shows.
 
-## Current status (Phase 2)
+## Current status (Phase 3)
 
 - Address search (Places autocomplete, with a plain geocoder fallback)
-- **City detection**: building footprints are fetched from OpenStreetMap
-  (Overpass API) around the address and clustered by the halachic joining
+- **City detection with auto-expansion**: buildings are fetched from
+  OpenStreetMap (Overpass API) and clustered by the halachic joining
   distances — a gap of up to 70⅔ amos (33.92 m) joins buildings into one
-  city, and two cities join within 141⅓ amos (67.84 m). The cluster
-  containing the address becomes the halachic city.
+  city, and two cities join within 141⅓ amos (67.84 m). The analyzed area
+  **grows automatically** until the entire contiguous city is captured, or
+  a selectable limit (Town / Large city / Metropolis) is hit — in which
+  case the app warns explicitly on which sides the city continues.
 - The city is squared as a north-aligned rectangle (ribua ha'olam) and the
   techum extends 2,000 amos (960 m) from its edge, corners included.
-- **Karpef toggle**: optionally add 70⅔ amos around the city before
-  measuring (the machlokes in SA 398:5) — the other opinion's line is shown
-  in gray for comparison.
-- **Manual adjustment**: the green city rectangle can be dragged/resized if
-  the detection is off, with a reset back to the detected boundary.
-- **Truncation warnings**: if the built-up area reaches the edge of the
-  analysis radius, the app says so explicitly (the true techum extends
-  further on those sides) rather than showing a misleading line.
-- Point mode (lone dwelling) remains available as a stringent fallback and
-  is used automatically when no buildings are found near the address.
+- **Ir muvla'as (SA HaRav 408:1)**: a neighboring city fully swallowed
+  within the techum counts as only 4 amos — the techum is extended beyond
+  it automatically.
+- **Karpef toggle** (machlokes SA 398:5) with the other opinion's line in
+  gray; **manual adjustment** of the city rectangle; point mode (lone
+  dwelling) as a stringent fallback.
+- **Eiruv techumin planner**: enter a destination; if it's beyond the
+  techum the app shades the feasible placement region (within your current
+  techum *and* close enough to cover the destination). Click or drag the
+  eiruv marker to place it: the new techum is drawn with gained (green)
+  and lost (red) areas, the muvla din credits your own city as 4 amos
+  within the new techum, and a checklist with the brachah and declaration
+  (per Ketzos HaShulchan) is provided. Kinyan shevisa b'raglav is noted as
+  the no-food alternative.
 
-Map legend: orange = detected building cluster (convex hull), green =
-squared city, blue = techum, gray = the other karpef opinion's techum.
+The in-app legend lists all map colors.
 
-Phase 3 adds the eiruv techumin planner. Known limitations: all structures
-are counted (which structures halachically join the city is an open item),
-multipolygon buildings are skipped, and OpenStreetMap coverage varies.
+Known limitations / open halachic items (see DESIGN.md §6): all structures
+are counted as joining the city; buildings are clustered by their bounding
+boxes; the eiruv is treated as a bare point (no credit for resting inside
+another city); muvla chains are single-level; feasibility ignores muvla
+bumps (all stringencies except the bbox clustering, which can join
+slightly more than strict footprints would).
 
 ## Setup
 

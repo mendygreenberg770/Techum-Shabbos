@@ -1,5 +1,11 @@
-import { KARPEF_M, TWO_CITIES_JOIN_M } from "../halacha/shiurim";
-import { metersPerDegree, type Bounds, type LatLng } from "../halacha/geometry";
+import { KARPEF_M, TECHUM_M, TWO_CITIES_JOIN_M } from "../halacha/shiurim";
+import {
+  expandBounds,
+  metersPerDegree,
+  rectIntersect,
+  type Bounds,
+  type LatLng,
+} from "../halacha/geometry";
 
 /**
  * Detection of the halachic city around a point.
@@ -40,6 +46,12 @@ export interface CityDetection {
    * techum) extends further in those directions.
    */
   truncatedSides: Side[];
+  /**
+   * Squared bounds of other detected cities (clusters of at least
+   * MIN_CITY_SIZE buildings not joined to the user's city) near enough
+   * to matter for the ir muvla'as din — i.e. within reach of the techum.
+   */
+  otherCities: Bounds[];
 }
 
 interface Vertex {
@@ -55,6 +67,8 @@ interface PBuilding {
   minY: number;
   maxX: number;
   maxY: number;
+  /** Axis-aligned rectangle: bbox gap is the exact outline gap. */
+  isRect: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -223,10 +237,14 @@ class UnionFind {
 // Detection
 // ---------------------------------------------------------------------------
 
+/**
+ * @param fetchedRect the area that was actually analyzed; cluster
+ *   vertices near its edges mark the detection as truncated there.
+ */
 export function detectCity(
   center: LatLng,
   buildingPolys: LatLng[][],
-  fetchRadiusM: number
+  fetchedRect: Bounds
 ): CityDetection | null {
   if (buildingPolys.length === 0) return null;
 
@@ -245,12 +263,22 @@ export function detectCity(
       maxX = Math.max(maxX, v.x);
       maxY = Math.max(maxY, v.y);
     }
-    return { verts, minX, minY, maxX, maxY };
+    const eps = 1e-6;
+    const isRect =
+      verts.length === 4 &&
+      verts.every(
+        (v) =>
+          (Math.abs(v.x - minX) < eps || Math.abs(v.x - maxX) < eps) &&
+          (Math.abs(v.y - minY) < eps || Math.abs(v.y - maxY) < eps)
+      );
+    return { verts, minX, minY, maxX, maxY, isRect };
   });
 
   // Spatial grid: each building is registered in every cell its bbox
   // (expanded by half the largest joining distance) overlaps, so any
-  // pair within the joining distance shares at least one cell.
+  // pair within the joining distance shares at least one cell. Pairs
+  // may be visited more than once (cheap), which avoids keeping a
+  // metro-scale dedup set in memory.
   const CELL = 100;
   const HALF = TWO_CITIES_JOIN_M / 2 + 1;
   const cells = new Map<string, number[]>();
@@ -274,18 +302,20 @@ export function detectCity(
 
   const uf = new UnionFind(buildings.length);
   const cityEdges: [number, number][] = [];
-  const seen = new Set<number>();
   const N = buildings.length;
   for (const list of cells.values()) {
     for (let a = 0; a < list.length; a++) {
       for (let c = a + 1; c < list.length; c++) {
-        const i = Math.min(list[a], list[c]);
-        const j = Math.max(list[a], list[c]);
-        const key = i * N + j;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        if (bboxGap(buildings[i], buildings[j]) > TWO_CITIES_JOIN_M) continue;
-        const d = buildingDist(buildings[i], buildings[j]);
+        const i = list[a];
+        const j = list[c];
+        const bi = buildings[i];
+        const bj = buildings[j];
+        const gap = bboxGap(bi, bj);
+        if (gap > TWO_CITIES_JOIN_M) continue;
+        if (gap <= KARPEF_M && uf.find(i) === uf.find(j)) continue;
+        // For axis-aligned rectangles (bbox-sourced data) the bbox gap
+        // is the exact outline gap; otherwise compute it precisely.
+        const d = bi.isRect && bj.isRect ? gap : buildingDist(bi, bj);
         if (d <= KARPEF_M) {
           uf.union(i, j);
         } else if (d <= TWO_CITIES_JOIN_M) {
@@ -322,38 +352,69 @@ export function detectCity(
       if (d === 0) break;
     }
   }
-
   const root = uf.find(nearestIdx);
+
+  // Per-cluster squared bounds (for the user's city and the muvla din).
+  const clusterBounds = new Map<
+    number,
+    { north: number; south: number; east: number; west: number; count: number }
+  >();
+  for (let i = 0; i < N; i++) {
+    const r = uf.find(i);
+    let cb = clusterBounds.get(r);
+    if (!cb) {
+      cb = { north: -Infinity, south: Infinity, east: -Infinity, west: Infinity, count: 0 };
+      clusterBounds.set(r, cb);
+    }
+    cb.count++;
+    for (const v of buildings[i].verts) {
+      cb.north = Math.max(cb.north, v.lat);
+      cb.south = Math.min(cb.south, v.lat);
+      cb.east = Math.max(cb.east, v.lng);
+      cb.west = Math.min(cb.west, v.lng);
+    }
+  }
+  const userCB = clusterBounds.get(root)!;
+  const bounds: Bounds = {
+    north: userCB.north,
+    south: userCB.south,
+    east: userCB.east,
+    west: userCB.west,
+  };
+
+  // Other cities within reach of the techum (with karpef and slack),
+  // for the ir muvla'as computation.
+  const reach = expandBounds(bounds, TECHUM_M + KARPEF_M + 100);
+  const otherCities: Bounds[] = [];
+  for (const [r, cb] of clusterBounds) {
+    if (r === root || cb.count < MIN_CITY_SIZE) continue;
+    const b: Bounds = { north: cb.north, south: cb.south, east: cb.east, west: cb.west };
+    if (rectIntersect(reach, b)) otherCities.push(b);
+  }
+
+  // The user's cluster: hull and truncation against the analyzed area.
   const clusterVerts: Vertex[] = [];
-  let clusterSize = 0;
-  let north = -Infinity, south = Infinity, east = -Infinity, west = Infinity;
   const truncated = new Set<Side>();
-  const edgeMargin = TWO_CITIES_JOIN_M + 5;
+  const marginLat = (TWO_CITIES_JOIN_M + 5) / perDegLat;
+  const marginLng = (TWO_CITIES_JOIN_M + 5) / perDegLng;
   for (let i = 0; i < N; i++) {
     if (uf.find(i) !== root) continue;
-    clusterSize++;
     for (const v of buildings[i].verts) {
       clusterVerts.push(v);
-      north = Math.max(north, v.lat);
-      south = Math.min(south, v.lat);
-      east = Math.max(east, v.lng);
-      west = Math.min(west, v.lng);
-      if (Math.hypot(v.x, v.y) >= fetchRadiusM - edgeMargin) {
-        if (Math.abs(v.x) > Math.abs(v.y)) {
-          truncated.add(v.x > 0 ? "east" : "west");
-        } else {
-          truncated.add(v.y > 0 ? "north" : "south");
-        }
-      }
+      if (v.lat >= fetchedRect.north - marginLat) truncated.add("north");
+      if (v.lat <= fetchedRect.south + marginLat) truncated.add("south");
+      if (v.lng >= fetchedRect.east - marginLng) truncated.add("east");
+      if (v.lng <= fetchedRect.west + marginLng) truncated.add("west");
     }
   }
 
   return {
-    bounds: { north, south, east, west },
+    bounds,
     hull: convexHull(clusterVerts).map((v) => ({ lat: v.lat, lng: v.lng })),
-    clusterSize,
+    clusterSize: userCB.count,
     totalBuildings: N,
     nearestBuildingM: nearestDist,
     truncatedSides: [...truncated],
+    otherCities,
   };
 }
