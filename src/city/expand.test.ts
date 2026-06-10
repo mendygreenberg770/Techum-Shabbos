@@ -87,6 +87,30 @@ describe("detectCityAuto: union of OSM and ArcGIS buildings", () => {
     });
   });
 
+  it("counts a building present in both datasets once", () => {
+    // The same two houses in OSM and ArcGIS (plus one ArcGIS-only):
+    // duplicates must not inflate counts (they burn the analysis limit).
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: RequestInfo | URL) =>
+        isArcgis(url)
+          ? okJson({
+              features: [
+                agsFeature(1, 0, 0),
+                agsFeature(2, 0, 0.0003),
+                agsFeature(3, 0, 0.0006),
+              ],
+            })
+          : okJson({ elements: [osmWay(1, 0, 0), osmWay(2, 0, 0.0003)] })
+      )
+    );
+    return detectCityAuto(C, LIMITS).then((r) => {
+      expect(r.merged).toBe(true);
+      expect(r.detection!.totalBuildings).toBe(3);
+      expect(r.detection!.clusterSize).toBe(3);
+    });
+  });
+
   it("keeps working when ArcGIS is down (OSM only, not merged)", () => {
     vi.stubGlobal(
       "fetch",

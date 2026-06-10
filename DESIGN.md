@@ -247,8 +247,21 @@ Shulchan Aruch HaRav:**
 1. **Karpef for a single city** — machlokes in 398:5; what does SA HaRav 398
    rule, and should the default line include it? (App will support showing
    both lines.)
-2. **Which structures join a city** — dinim of what counts as a beis dirah
-   (shuls, stores, factories, ruins, three-walled structures, etc.).
+2. **Which structures join a city** — the dinim (Mishnah Eruvin 5:1 and
+   Gemara 55b; Rambam Shabbos 28:9; SA OC 398:6 and SA HaRav 398):
+   the governing principle is **beis dirah** — a structure made for, or
+   containing, human dwelling, of at least 4×4 amos, within 70⅔ amos.
+   *Join the city:* houses; a grave monument (nefesh), bridge, cemetery
+   building, shul, or storehouse **that contains a dwelling** (e.g., for
+   its keeper/chazzan); watchmen's huts in the fields (burganin); two
+   walls with roofing between them. *Do not join:* those same structures
+   **without** a dwelling; a dovecote; a pit/cistern or bare cave; a
+   house on a ship; a breached monument. Ruins (three walls without a
+   roof) are a machlokes. **The app currently counts every mapped
+   structure — for sheds/garages/barns this is a kula** (it enlarges the
+   city and the techum); tag-based classification (OSM building tags /
+   ArcGIS occupancy class) is the planned fix, with ambiguous structures
+   flagged for the user and a stringent "dwellings only" toggle.
 3. **Bow-shaped (keshes) and irregular cities** — when the bounding-rectangle
    squaring applies as-is and when the city's gaps break it apart.
 4. **Rivers, highways, cemeteries** inside or at the edge of the built-up

@@ -141,6 +141,43 @@ describe("muvla with a karpef-buffered base", () => {
   });
 });
 
+describe("several muvla towns at once (field report regression)", () => {
+  const home = rectM(-50, -50, 50, 50);
+  const techum = expandBounds(home, TECHUM_M); // edge at 1010
+
+  it("extends for every swallowed town, however deep inside the techum", () => {
+    // Big town near the edge, small town near the edge beside it, and a
+    // small town much deeper inside — ALL fully swallowed must extend:
+    // each extension reaches (its own depth − 4 amos) past the base line.
+    const big = rectM(400, -300, 900, 200); // 500 m deep
+    const smallNearEdge = rectM(850, 0, 930, 60); // 80 m deep
+    const smallDeep = rectM(150, -45, 210, 15); // 60 m deep, close to home
+    const bumps = computeMuvlaBumps(home, techum, [big, smallNearEdge, smallDeep]);
+    expect(bumps.map((b) => b.city)).toEqual(
+      expect.arrayContaining([big, smallNearEdge, smallDeep])
+    );
+    for (const b of bumps) {
+      const depth = mLng(b.city.east) - mLng(b.city.west);
+      expect(mLng(b.bounds.east)).toBeCloseTo(TECHUM_M + 50 + depth - FOUR_AMOS_M, 1);
+    }
+  });
+
+  it("a small town whose corridor sits inside a deeper town's corridor is subsumed", () => {
+    // The small town's extension is real but lies entirely within the
+    // big town's extension — no visible change to the boundary (the
+    // UI annotates this instead of hiding it).
+    const big = rectM(400, -300, 900, 200);
+    const smallInside = rectM(150, -100, 210, -40); // corridor ⊂ big's
+    const bumps = computeMuvlaBumps(home, techum, [big, smallInside]);
+    const bigBump = bumps.find((b) => b.city === big)!;
+    const smallBump = bumps.find((b) => b.city === smallInside)!;
+    expect(smallBump).toBeDefined();
+    expect(mLng(smallBump.bounds.east)).toBeLessThan(mLng(bigBump.bounds.east));
+    expect(smallBump.bounds.north).toBeLessThanOrEqual(bigBump.bounds.north);
+    expect(smallBump.bounds.south).toBeGreaterThanOrEqual(bigBump.bounds.south);
+  });
+});
+
 describe("kalsaCities (kalsa midaso — the line ends mid-town)", () => {
   const home = rectM(-50, -50, 50, 50);
   const techum = expandBounds(home, TECHUM_M); // edge at x=1010

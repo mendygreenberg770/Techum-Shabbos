@@ -85,14 +85,81 @@ export async function detectCityExpanding(
   let useAgs = true;
   let osmCount = 0;
   let agsCount = 0;
+  /** Raw (pre-dedupe) ArcGIS features seen — zero in the initial area
+   * means we are outside the US layers' coverage. */
+  let agsRaw = 0;
 
-  const ingest = (list: FetchedBuilding[]) => {
-    for (const b of list) byId.set(b.id, b.ring);
+  // Cross-dataset duplicate filter: the same building reported by both
+  // OSM and ArcGIS must count once. Duplicates were inflating building
+  // counts and burning the analysis limits at twice the real rate,
+  // truncating large cities early. A bbox overlapping an accepted bbox
+  // by ≥60% of the smaller area is the same building (distinct adjacent
+  // buildings never overlap that much); indexed by ~30 m grid cells.
+  const CELL_DEG = 0.0003;
+  const dupGrid = new Map<string, Bounds[]>();
+  const ringBox = (ring: LatLng[]): Bounds => {
+    let n = -Infinity, s = Infinity, e = -Infinity, w = Infinity;
+    for (const p of ring) {
+      n = Math.max(n, p.lat);
+      s = Math.min(s, p.lat);
+      e = Math.max(e, p.lng);
+      w = Math.min(w, p.lng);
+    }
+    return { north: n, south: s, east: e, west: w };
+  };
+  const cellsOf = (b: Bounds): string[] => {
+    const keys: string[] = [];
+    for (let cy = Math.floor(b.south / CELL_DEG); cy <= Math.floor(b.north / CELL_DEG); cy++) {
+      for (let cx = Math.floor(b.west / CELL_DEG); cx <= Math.floor(b.east / CELL_DEG); cx++) {
+        keys.push(`${cy}:${cx}`);
+      }
+    }
+    return keys;
+  };
+  const boxArea = (b: Bounds) =>
+    Math.max(0, b.north - b.south) * Math.max(0, b.east - b.west);
+  const duplicates = (b: Bounds): boolean => {
+    for (const key of cellsOf(b)) {
+      for (const o of dupGrid.get(key) ?? []) {
+        const oN = Math.min(b.north, o.north);
+        const oS = Math.max(b.south, o.south);
+        const oE = Math.min(b.east, o.east);
+        const oW = Math.max(b.west, o.west);
+        if (oN <= oS || oE <= oW) continue;
+        const overlap = (oN - oS) * (oE - oW);
+        if (overlap >= 0.6 * Math.min(boxArea(b), boxArea(o))) return true;
+      }
+    }
+    return false;
+  };
+  const register = (b: Bounds) => {
+    for (const key of cellsOf(b)) {
+      let list = dupGrid.get(key);
+      if (!list) {
+        list = [];
+        dupGrid.set(key, list);
+      }
+      list.push(b);
+    }
+  };
+
+  /** @returns how many buildings were newly accepted. */
+  const ingest = (list: FetchedBuilding[], dedupe: boolean): number => {
+    let accepted = 0;
+    for (const b of list) {
+      if (byId.has(b.id)) continue;
+      const box = ringBox(b.ring);
+      if (dedupe && duplicates(box)) continue;
+      byId.set(b.id, b.ring);
+      register(box);
+      accepted++;
+    }
+    return accepted;
   };
 
   const fetchInto = async (rects: Bounds[]) => {
     if (simpleFetcher) {
-      ingest(await simpleFetcher(rects, signal));
+      ingest(await simpleFetcher(rects, signal), false);
       return;
     }
     const tasks: ["osm" | "ags", Promise<FetchedBuilding[]>][] = [];
@@ -101,13 +168,19 @@ export async function detectCityExpanding(
     const settled = await Promise.allSettled(tasks.map((t) => t[1]));
     let anyOk = false;
     let firstError: unknown = null;
+    // OSM is ingested first (authoritative footprints); ArcGIS entries
+    // duplicating an accepted building are dropped.
     settled.forEach((r, i) => {
       const kind = tasks[i][0];
       if (r.status === "fulfilled") {
         anyOk = true;
-        ingest(r.value);
-        if (kind === "osm") osmCount += r.value.length;
-        else agsCount += r.value.length;
+        const accepted = ingest(r.value, kind === "ags");
+        if (kind === "osm") {
+          osmCount += accepted;
+        } else {
+          agsRaw += r.value.length;
+          agsCount += accepted;
+        }
       } else {
         // A dataset that failed stays off for the rest of the run — no
         // re-crawling a dead endpoint cascade every expansion round.
@@ -135,7 +208,9 @@ export async function detectCityExpanding(
   await fetchInto([rect]);
   // Outside the US the ArcGIS layers are legitimately empty — skip
   // them for the rest of the run instead of querying for nothing.
-  if (source === "buildings" && agsCount === 0) useAgs = false;
+  // (Raw count, not accepted: where OSM is locally complete every ags
+  // building deduplicates away, but the outskirts may still need them.)
+  if (source === "buildings" && agsRaw === 0) useAgs = false;
   let detection: CityDetection | null = null;
   for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     detection = detectCity(center, [...byId.values()], rect, minCitySize);

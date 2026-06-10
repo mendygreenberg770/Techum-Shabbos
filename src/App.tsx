@@ -19,7 +19,7 @@ import {
   rotatedFeasible,
   roundedRectRing,
 } from "./halacha/eruv";
-import { computeMuvlaBumps, kalsaCities, mergeCities } from "./halacha/muvla";
+import { computeMuvlaBumps, kalsaCities, mergeCities, rectContainedIn } from "./halacha/muvla";
 import {
   distanceMeters,
   expandBounds,
@@ -527,7 +527,12 @@ export default function App() {
         b.side === "east" || b.side === "west"
           ? (b.city.east - b.city.west) * perDegLng
           : (b.city.north - b.city.south) * perDegLat;
-      return { side: b.side, extM, cityDepthM };
+      // An extension entirely inside a larger neighboring extension adds
+      // no visible area — the boundary is the maximum of all of them.
+      const subsumed = view.bumps.some(
+        (other) => other !== b && rectContainedIn(b.bounds, other.bounds)
+      );
+      return { side: b.side, extM, cityDepthM, subsumed };
     });
   })();
 
@@ -646,9 +651,8 @@ export default function App() {
                       Building data is the <b>union</b> of OpenStreetMap and
                       the USA Structures dataset (FEMA/Microsoft, via
                       ArcGIS) — a house missing from either dataset is
-                      covered by the other. (Buildings present in both are
-                      counted twice in the totals; the geometry is
-                      unaffected.)
+                      covered by the other; buildings present in both are
+                      counted once.
                     </p>
                   )}
                 {noCityFound && cityState.status === "done" && !manualCityBounds && (
@@ -722,6 +726,14 @@ export default function App() {
                       " The entire contiguous city was captured."}
                   </p>
                 )}
+                {detection && cityState.capped && truncated.length === 0 && (
+                  <p className="warning">
+                    ⚠ The analysis stopped at the selected limit before
+                    confirming the city is fully captured — the true city
+                    (and techum) may extend further. Raise the analysis
+                    limit (slower) or adjust the boundary manually.
+                  </p>
+                )}
                 {detection && truncated.length > 0 && (
                   <p className="warning">
                     ⚠ The contiguous built-up area exceeds the analysis limit
@@ -753,6 +765,8 @@ export default function App() {
                           depth, so the techum continues ≈
                           <b>{Math.round(d.extM).toLocaleString()} m</b>{" "}
                           beyond the base 2,000-amah line.
+                          {d.subsumed &&
+                            " (This extension lies entirely within a larger neighboring extension, so it adds no visible area — the boundary already reaches further there.)"}
                         </li>
                       ))}
                     </ul>
