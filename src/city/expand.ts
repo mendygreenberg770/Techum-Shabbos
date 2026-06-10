@@ -37,9 +37,11 @@ export interface ExpandResult {
   /** Set when building data stopped loading mid-expansion: the result
    * is based on what was fetched so far and may be incomplete. */
   fetchError?: string;
-  /** True when OSM stopped responding partway and the remaining area
-   * was filled in from the ArcGIS US footprints. */
-  mixedSources?: boolean;
+  /** Both OSM and the US footprints contributed buildings (union). */
+  merged?: boolean;
+  /** Label override when the nominal source ended up unused — e.g. OSM
+   * returned nothing and ArcGIS supplied every building. */
+  effectiveSource?: CitySource;
 }
 
 const INITIAL_HALF_M = 1200;
@@ -71,57 +73,85 @@ export async function detectCityExpanding(
   const { perDegLat, perDegLng } = metersPerDegree(center.lat);
   let rect = expandBounds(pointBounds(center), INITIAL_HALF_M);
   const byId = new Map<number | string, LatLng[]>();
-  const fetcher = FETCHERS[source];
   const minCitySize = source === "areas" ? 1 : undefined;
-  let mixedSources = false;
 
-  const fetchInto = async (rects: Bounds[], allowFallback = false) => {
-    // Once OSM has failed this run, stay on the fallback source — no
-    // point re-crawling the dead endpoint cascade every round.
-    if (mixedSources && source === "buildings") {
-      for (const b of await fetchBuildingsArcgis(rects, signal)) {
-        byId.set(b.id, b.ring);
-      }
+  // The "buildings" source is a UNION of OSM and the ArcGIS US
+  // footprints: OSM coverage is patchy in parts of the US, and one
+  // missing house can break a 70⅔-amos chain and cut off everything
+  // beyond it. Duplicate footprints across datasets overlap and join
+  // the same cluster — harmless to the geometry (counts are inflated).
+  const simpleFetcher = source === "buildings" ? null : FETCHERS[source];
+  let useOsm = true;
+  let useAgs = true;
+  let osmCount = 0;
+  let agsCount = 0;
+
+  const ingest = (list: FetchedBuilding[]) => {
+    for (const b of list) byId.set(b.id, b.ring);
+  };
+
+  const fetchInto = async (rects: Bounds[]) => {
+    if (simpleFetcher) {
+      ingest(await simpleFetcher(rects, signal));
       return;
     }
-    try {
-      for (const b of await fetcher(rects, signal)) {
-        byId.set(b.id, b.ring);
+    const tasks: ["osm" | "ags", Promise<FetchedBuilding[]>][] = [];
+    if (useOsm) tasks.push(["osm", fetchBuildingsInRects(rects, signal)]);
+    if (useAgs) tasks.push(["ags", fetchBuildingsArcgis(rects, signal)]);
+    const settled = await Promise.allSettled(tasks.map((t) => t[1]));
+    let anyOk = false;
+    let firstError: unknown = null;
+    settled.forEach((r, i) => {
+      const kind = tasks[i][0];
+      if (r.status === "fulfilled") {
+        anyOk = true;
+        ingest(r.value);
+        if (kind === "osm") osmCount += r.value.length;
+        else agsCount += r.value.length;
+      } else {
+        // A dataset that failed stays off for the rest of the run — no
+        // re-crawling a dead endpoint cascade every expansion round.
+        firstError ??= r.reason;
+        if (kind === "osm") useOsm = false;
+        else useAgs = false;
       }
-    } catch (e) {
-      const interrupted = signal?.aborted || isCancelled?.();
-      if (!allowFallback || interrupted || source !== "buildings") throw e;
-      // OSM stopped responding mid-expansion (rate limit / blocked):
-      // fill the remaining strips from the ArcGIS US footprints instead
-      // of truncating the city. Duplicate buildings at the seams are
-      // harmless — same footprint, same cluster.
-      for (const b of await fetchBuildingsArcgis(rects, signal)) {
-        byId.set(b.id, b.ring);
-      }
-      mixedSources = true;
+    });
+    if (!anyOk) {
+      throw firstError instanceof Error ? firstError : new Error(String(firstError));
     }
   };
+
+  const finish = (
+    partial: Pick<ExpandResult, "detection" | "fetchedRect" | "capped" | "fetchError">
+  ): ExpandResult => ({
+    ...partial,
+    merged: source === "buildings" && osmCount > 0 && agsCount > 0 ? true : undefined,
+    effectiveSource:
+      source === "buildings" && osmCount === 0 && agsCount > 0 ? "arcgis" : undefined,
+  });
 
   // The very first fetch failing means no data at all — let it throw,
   // detectCityAuto moves on to the next source cleanly.
   await fetchInto([rect]);
+  // Outside the US the ArcGIS layers are legitimately empty — skip
+  // them for the rest of the run instead of querying for nothing.
+  if (source === "buildings" && agsCount === 0) useAgs = false;
   let detection: CityDetection | null = null;
   for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     detection = detectCity(center, [...byId.values()], rect, minCitySize);
     const sides = detection?.truncatedSides ?? [];
     if (!detection || sides.length === 0 || isCancelled?.()) {
-      return {
+      return finish({
         detection,
         fetchedRect: rect,
         capped: isCancelled?.() ?? false,
-        mixedSources,
-      };
+      });
     }
 
     const spanNS = (rect.north - rect.south) * perDegLat;
     const spanEW = (rect.east - rect.west) * perDegLng;
     if (byId.size >= limits.maxBuildings || Math.max(spanNS, spanEW) >= limits.maxSpanM) {
-      return { detection, fetchedRect: rect, capped: true, mixedSources };
+      return finish({ detection, fetchedRect: rect, capped: true });
     }
 
     onProgress?.({ buildings: byId.size, iteration, expandingSides: sides });
@@ -153,25 +183,24 @@ export async function detectCityExpanding(
       // One union request per round instead of one per strip — fewer
       // requests means fewer rate-limit failures on the public servers.
       if (strips.length > 0 && !isCancelled?.()) {
-        await fetchInto(strips, true);
+        await fetchInto(strips);
       }
     } catch (e) {
       if (isCancelled?.() || signal?.aborted) {
-        return { detection, fetchedRect: old, capped: true, mixedSources };
+        return finish({ detection, fetchedRect: old, capped: true });
       }
-      // Mid-expansion failure (even the fallback source): keep the city
+      // Mid-expansion failure of every remaining dataset: keep the city
       // detected so far (with its truncation warnings) rather than
       // discarding everything. The query caches make Retry resume here.
-      return {
+      return finish({
         detection,
         fetchedRect: old,
         capped: true,
-        mixedSources,
         fetchError: e instanceof Error ? e.message : String(e),
-      };
+      });
     }
   }
-  return { detection, fetchedRect: rect, capped: true, mixedSources };
+  return finish({ detection, fetchedRect: rect, capped: true });
 }
 
 export interface AutoDetectResult extends ExpandResult {
@@ -180,11 +209,11 @@ export interface AutoDetectResult extends ExpandResult {
 
 /**
  * Detect the city, trying sources in order of preference:
- *  1. OSM building footprints (worldwide, community-curated),
- *  2. US building footprints via ArcGIS (FEMA / Microsoft) — covers
- *     both OSM gaps and networks whose filters block the Overpass
- *     servers but allow arcgis.com,
- *  3. OSM settled-area outlines as a coarse estimate (flagged in the UI).
+ *  1. Building footprints — the UNION of OSM (worldwide,
+ *     community-curated) and the ArcGIS US footprints (FEMA /
+ *     Microsoft, complete ML-extracted US coverage), so a house missing
+ *     from either dataset is covered by the other;
+ *  2. OSM settled-area outlines as a coarse estimate (flagged in the UI).
  * A source that errors or finds nothing falls through to the next; only
  * when every source errors does the whole detection fail.
  */
@@ -195,15 +224,15 @@ export async function detectCityAuto(
   isCancelled?: () => boolean,
   signal?: AbortSignal
 ): Promise<AutoDetectResult> {
-  const sources: CitySource[] = ["buildings", "arcgis", "areas"];
+  const sources: CitySource[] = ["buildings", "areas"];
   let lastError: unknown = null;
   let lastEmpty: AutoDetectResult | null = null;
   for (const source of sources) {
     if (isCancelled?.() || signal?.aborted) break;
     try {
       const r = await detectCityExpanding(center, limits, onProgress, isCancelled, signal, source);
-      if (r.detection) return { ...r, source };
-      lastEmpty = { ...r, source };
+      if (r.detection) return { ...r, source: r.effectiveSource ?? source };
+      lastEmpty = { ...r, source: r.effectiveSource ?? source };
     } catch (e) {
       if (isCancelled?.() || signal?.aborted) throw e;
       lastError = e;

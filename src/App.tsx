@@ -73,8 +73,8 @@ interface CityState {
   /** What the outline was built from (settled-area outlines are a
    * coarser fallback where OSM has no buildings mapped). */
   source?: CitySource;
-  /** OSM stopped responding partway; the rest came from ArcGIS. */
-  mixedSources?: boolean;
+  /** Both OSM and the US footprints contributed buildings (union). */
+  merged?: boolean;
 }
 
 interface EruvCityState {
@@ -209,7 +209,7 @@ export default function App() {
           capped: result.capped,
           fetchError: result.fetchError,
           source: result.source,
-          mixedSources: result.mixedSources,
+          merged: result.merged,
         });
         setProgress(null);
       })
@@ -608,12 +608,14 @@ export default function App() {
                 )}
                 {cityState.status === "done" &&
                   !cityState.fetchError &&
-                  cityState.mixedSources && (
+                  cityState.merged && (
                     <p className="muted">
-                      OpenStreetMap stopped responding partway through the
-                      analysis — the remaining area was filled in from the
-                      USA Structures dataset (FEMA/Microsoft, via ArcGIS),
-                      so the city was still captured in full.
+                      Building data is the <b>union</b> of OpenStreetMap and
+                      the USA Structures dataset (FEMA/Microsoft, via
+                      ArcGIS) — a house missing from either dataset is
+                      covered by the other. (Buildings present in both are
+                      counted twice in the totals; the geometry is
+                      unaffected.)
                     </p>
                   )}
                 {noCityFound && cityState.status === "done" && !manualCityBounds && (
