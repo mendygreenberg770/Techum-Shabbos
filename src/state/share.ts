@@ -19,6 +19,9 @@ export interface AppSnapshot {
   mode: Mode;
   limit: LimitKey;
   karpef: boolean;
+  /** Three-villages din (SA 398:8) — a kula, default off. Optional so
+   * links from older versions stay valid. */
+  villages?: boolean;
   manualCity: Bounds | null;
   eruv: EruvSnapshot | null;
 }
@@ -40,6 +43,7 @@ export function normalizeSnapshot(snap: AppSnapshot): AppSnapshot {
     mode: snap.mode,
     limit: snap.limit,
     karpef: snap.karpef,
+    villages: snap.villages || undefined,
     manualCity: snap.manualCity ? roundBounds(snap.manualCity) : null,
     eruv: snap.eruv
       ? {
@@ -126,6 +130,7 @@ export function validateSnapshot(raw: unknown): AppSnapshot | null {
     mode: o.mode,
     limit: o.limit,
     karpef: o.karpef,
+    villages: o.villages === true || undefined,
     manualCity,
     eruv,
   };

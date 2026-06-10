@@ -44,10 +44,12 @@ interface Props {
   newTechumBumps: Bounds[];
   gained: Bounds[];
   lost: Bounds[];
-  /** Measuring ruler: when active, map clicks set the two endpoints. */
+  /** Measuring ruler: when active, map clicks set the two endpoints;
+   * endpoints are draggable for fine adjustment. */
   measureActive: boolean;
   measurePoints: LatLng[];
   onMeasurePoint: (p: LatLng) => void;
+  onMeasureMove: (index: number, p: LatLng) => void;
   /** Viewport: refit to fitBounds when fitKey changes. */
   fitBounds: Bounds | null;
   fitKey: string;
@@ -513,19 +515,33 @@ export default function MapView(props: Props) {
       measureLineRef.current.setMap(null);
     }
     while (measureDotPool.current.length < measurePoints.length) {
-      measureDotPool.current.push(
-        new google.maps.Marker({
-          icon: {
-            path: google.maps.SymbolPath.CIRCLE,
-            scale: 5,
-            fillColor: "#1c1c1c",
-            fillOpacity: 1,
-            strokeColor: "#ffffff",
-            strokeWeight: 1.5,
-          },
-          clickable: false,
-        })
-      );
+      const idx = measureDotPool.current.length;
+      const dot = new google.maps.Marker({
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 7,
+          fillColor: idx === 0 ? "#1c1c1c" : "#1a5fb4",
+          fillOpacity: 1,
+          strokeColor: "#ffffff",
+          strokeWeight: 2,
+        },
+        label: {
+          text: String(idx + 1),
+          color: "#ffffff",
+          fontSize: "10px",
+          fontWeight: "bold",
+        },
+        draggable: true,
+        title: `Measure point ${idx + 1} (drag to adjust)`,
+        zIndex: 1000,
+      });
+      dot.addListener("dragend", () => {
+        const pos = dot.getPosition();
+        if (pos) {
+          propsRef.current.onMeasureMove(idx, { lat: pos.lat(), lng: pos.lng() });
+        }
+      });
+      measureDotPool.current.push(dot);
     }
     measureDotPool.current.forEach((m, i) => {
       if (i < measurePoints.length) {

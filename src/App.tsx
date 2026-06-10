@@ -21,6 +21,7 @@ import {
   roundedRectRing,
 } from "./halacha/eruv";
 import { computeMuvlaBumps, kalsaCities, mergeCities, rectContainedIn } from "./halacha/muvla";
+import { applyThreeVillages } from "./halacha/villages";
 import {
   distanceMeters,
   expandBounds,
@@ -130,6 +131,7 @@ export default function App() {
   const [mode, setMode] = useState<Mode>(initial?.mode ?? "city");
   const [limitKey, setLimitKey] = useState<LimitKey>(initial?.limit ?? "city");
   const [karpefOn, setKarpefOn] = useState(initial?.karpef ?? false);
+  const [villagesOn, setVillagesOn] = useState(initial?.villages ?? false);
   const [adjusting, setAdjusting] = useState(false);
   const [manualCityBounds, setManualCityBounds] = useState<Bounds | null>(null);
   const [cityState, setCityState] = useState<CityState>({ status: "idle" });
@@ -172,6 +174,7 @@ export default function App() {
     setMode(snap.mode);
     setLimitKey(snap.limit);
     setKarpefOn(snap.karpef);
+    setVillagesOn(snap.villages ?? false);
     setEruvOn(!!snap.eruv);
     setDestination(snap.eruv?.destination ?? null);
     setRotationOn(snap.eruv?.rotationOn ?? false);
@@ -325,13 +328,14 @@ export default function App() {
       mode,
       limit: limitKey,
       karpef: karpefOn,
+      villages: villagesOn || undefined,
       manualCity: manualCityBounds,
       eruv:
         eruvOn && destination
           ? { destination, spot: eruvSpot, rotationOn, rotationOffset }
           : null,
     };
-  }, [place, mode, limitKey, karpefOn, manualCityBounds, eruvOn, destination, eruvSpot, rotationOn, rotationOffset]);
+  }, [place, mode, limitKey, karpefOn, villagesOn, manualCityBounds, eruvOn, destination, eruvSpot, rotationOn, rotationOffset]);
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -381,22 +385,30 @@ export default function App() {
 
   const view = useMemo(() => {
     if (!place || cityLoading) return null;
-    const otherCities = detection?.otherCities ?? [];
+    // Three-villages din (SA 398:8, opt-in kula): a middle village that
+    // "viewed as between" two outer ones leaves ≤141⅓ amos to each
+    // joins all three into one city — squared together.
+    const villages =
+      villagesOn && usingCity && cityBounds && !manualCityBounds
+        ? applyThreeVillages(cityBounds, detection?.otherCities ?? [])
+        : null;
+    const effCityBounds = villages ? villages.bounds : cityBounds;
+    const otherCities = villages ? villages.remaining : detection?.otherCities ?? [];
     const base =
-      usingCity && cityBounds
+      usingCity && effCityBounds
         ? karpefOn
-          ? expandBounds(cityBounds, KARPEF_M)
-          : cityBounds
+          ? expandBounds(effCityBounds, KARPEF_M)
+          : effCityBounds
         : pointBounds(place.location);
     const techum = expandBounds(base, TECHUM_M);
     const bumps =
-      usingCity && cityBounds
-        ? computeMuvlaBumps(base, techum, otherCities, undefined, cityBounds)
+      usingCity && effCityBounds
+        ? computeMuvlaBumps(base, techum, otherCities, undefined, effCityBounds)
         : [];
     const altTechum =
-      usingCity && cityBounds
+      usingCity && effCityBounds
         ? expandBounds(
-            karpefOn ? cityBounds : expandBounds(cityBounds, KARPEF_M),
+            karpefOn ? effCityBounds : expandBounds(effCityBounds, KARPEF_M),
             TECHUM_M
           )
         : null;
@@ -424,7 +436,7 @@ export default function App() {
         ]
       : [];
     const allCities = mergeCities(
-      usingCity && cityBounds ? [cityBounds, ...otherCities] : otherCities,
+      usingCity && effCityBounds ? [effCityBounds, ...otherCities] : otherCities,
       eruvCities
     );
     // Towns that can carry the eiruv when no bare-point placement could:
@@ -435,7 +447,7 @@ export default function App() {
       plan && !plan.destinationInHomeTechum && destination
         ? hostTownCandidates(
             techum,
-            allCities.filter((c) => c !== cityBounds),
+            allCities.filter((c) => c !== effCityBounds),
             destination.location
           )
         : [];
@@ -451,7 +463,7 @@ export default function App() {
             // Rashi/Rama 408:1 (the common practice): the home town
             // stays accessible as 4 amos. See ExplainPanel for the
             // other opinions.
-            { ramaHomeCity: usingCity ? cityBounds : null }
+            { ramaHomeCity: usingCity ? effCityBounds : null }
           )
         : null;
 
@@ -499,8 +511,20 @@ export default function App() {
       for (const b of placement.newBumps) fit = rectUnion(fit, b.bounds);
     }
 
-    return { techum, altTechum, bumps, partialCities, plan, placement, hostCandidates, rotated, fit };
-  }, [place, cityLoading, usingCity, cityBounds, karpefOn, detection, eruvOn, destination, eruvSpot, eruvCityState, eruvCityResolved, rotationOn, rotationOffset]);
+    return {
+      techum,
+      altTechum,
+      bumps,
+      partialCities,
+      plan,
+      placement,
+      hostCandidates,
+      rotated,
+      fit,
+      effCityBounds,
+      villagesJoined: villages?.absorbed.length ?? 0,
+    };
+  }, [place, cityLoading, usingCity, cityBounds, manualCityBounds, karpefOn, villagesOn, detection, eruvOn, destination, eruvSpot, eruvCityState, eruvCityResolved, rotationOn, rotationOffset]);
 
   if (!apiKey || authFailed) {
     return (
@@ -518,6 +542,8 @@ export default function App() {
 
   const truncated = detection?.truncatedSides ?? [];
   const plan = view?.plan ?? null;
+  /** The city boundary in effect (three-villages join applied). */
+  const effCity = view?.effCityBounds ?? cityBounds;
   const placement = view?.placement ?? null;
   const rotated = view?.rotated ?? null;
   const partialCities = view?.partialCities ?? [];
@@ -897,6 +923,33 @@ export default function App() {
                     <label className="toggle">
                       <input
                         type="checkbox"
+                        checked={villagesOn}
+                        onChange={(e) => setVillagesOn(e.target.checked)}
+                      />
+                      Three-villages din (SA 398:8): join two outer towns
+                      through a middle village that, "viewed as between"
+                      them, would leave ≤ 141⅓ amos to each — a <b>kula</b>;
+                      confirm with your rav before relying on it.
+                    </label>
+                    {villagesOn && view && view.villagesJoined > 0 && (
+                      <p className="success">
+                        ✓ Three-villages din applied: {view.villagesJoined}{" "}
+                        neighboring town{view.villagesJoined === 1 ? "" : "s"}{" "}
+                        joined your city — the green square (and the techum)
+                        now covers them.
+                      </p>
+                    )}
+                    {villagesOn && view && view.villagesJoined === 0 && (
+                      <p className="muted">
+                        Three-villages din: no qualifying triangle found here
+                        (middle within 2,000 amos of both outers, and wide
+                        enough to leave ≤ 141⅓ amos to each when viewed
+                        between them).
+                      </p>
+                    )}
+                    <label className="toggle">
+                      <input
+                        type="checkbox"
                         checked={showDetails}
                         onChange={(e) => setShowDetails(e.target.checked)}
                       />
@@ -1179,7 +1232,7 @@ export default function App() {
                             )}
                             {!rotationOn &&
                               placement?.hostCity &&
-                              (placement.hostCity === cityBounds ? (
+                              (placement.hostCity === effCity ? (
                                 <p className="warning">
                                   ⚠ The eiruv rests inside your own town (or
                                   its 70⅔-amah margin) — there it has{" "}
@@ -1234,8 +1287,9 @@ export default function App() {
                   setMeasurePts([]);
                 }}
               />
-              📏 Measure a distance in amos (tap two points on the map —
-              e.g., a gap between houses, to check the joining shiurim)
+              📏 Measure a distance in amos: tap two points on the map —
+              e.g., a gap between houses — then <b>drag the numbered pins</b>{" "}
+              to the exact spots. A third tap starts a new measurement.
             </label>
             {measureOn && measurePts.length === 2 && (() => {
               const m = distanceMeters(measurePts[0], measurePts[1]);
@@ -1325,7 +1379,7 @@ export default function App() {
             altTechumBounds={showDetails ? view?.altTechum ?? null : null}
             techumBumps={view?.bumps.map((b) => b.bounds) ?? []}
             swallowedCities={view?.bumps.map((b) => b.city) ?? []}
-            cityBounds={usingCity ? cityBounds : null}
+            cityBounds={usingCity ? effCity : null}
             cityOutline={usingCity && !manualCityBounds ? cityOutline : null}
             neighborOutline={neighborOutline}
             cityEditable={adjusting}
@@ -1354,7 +1408,7 @@ export default function App() {
                 ? [
                     ...(placement?.newBumps.map((b) => b.bounds) ?? []),
                     ...(placement?.ramaCity ? [placement.ramaCity] : []),
-                    ...(placement?.hostCity && placement.hostCity !== cityBounds
+                    ...(placement?.hostCity && placement.hostCity !== effCity
                       ? [placement.hostCity]
                       : []),
                   ]
@@ -1366,6 +1420,9 @@ export default function App() {
             measurePoints={measurePts}
             onMeasurePoint={(p) =>
               setMeasurePts((prev) => (prev.length >= 2 ? [p] : [...prev, p]))
+            }
+            onMeasureMove={(index, p) =>
+              setMeasurePts((prev) => prev.map((q, i) => (i === index ? p : q)))
             }
             fitBounds={view?.fit ?? null}
             fitKey={`${place?.address ?? ""}|${mode}|${usingCity ? "city" : "point"}|${limitKey}|${eruvOn}|${destination?.address ?? ""}|${placement ? "placed" : ""}|${rotationOn}`}
