@@ -1,10 +1,16 @@
 import type { Bounds, LatLng } from "../halacha/geometry";
 
+/** Optional same-origin (or custom) proxy, for networks whose filters
+ * block the public Overpass endpoints — see api/overpass.js and the
+ * README. Tried first when configured. */
+const PROXY = (import.meta.env.VITE_OVERPASS_PROXY as string | undefined)?.trim();
+
 /** Public Overpass instances with worldwide data and CORS enabled.
  * Tried in rotation: a request that fails (HTTP error, rate limit, or a
  * "remark" runtime error in an otherwise-200 response) moves to the next
  * endpoint, and the first one that works is preferred afterwards. */
 const ENDPOINTS = [
+  ...(PROXY ? [PROXY] : []),
   "https://overpass-api.de/api/interpreter",
   "https://overpass.private.coffee/api/interpreter",
   "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
@@ -24,7 +30,7 @@ interface OverpassElement {
 }
 
 export interface FetchedBuilding {
-  id: number;
+  id: number | string;
   /** Building outline as its bounding rectangle (4 corners). */
   ring: LatLng[];
 }
@@ -45,7 +51,7 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
 
 /** Combine the caller's signal with a timeout, degrading gracefully on
  * browsers without AbortSignal.timeout/any (older Safari). */
-function requestSignal(signal?: AbortSignal): AbortSignal | undefined {
+export function requestSignal(signal?: AbortSignal): AbortSignal | undefined {
   const timeout =
     typeof AbortSignal.timeout === "function"
       ? AbortSignal.timeout(FETCH_TIMEOUT_MS)

@@ -20,12 +20,14 @@ See [DESIGN.md](DESIGN.md) for the full design and roadmap.
   **grows automatically** until the entire contiguous city is captured, or
   a selectable limit (Town / Large city / Metropolis) is hit — in which
   case the app warns explicitly on which sides the city continues.
-- **Data fallbacks where OSM is sparse**: in regions with no individual
-  building footprints mapped (common in parts of the US), the city is
-  estimated from OSM **settled-area outlines** (landuse =
-  residential/commercial/retail), clearly flagged for review; where even
-  those are missing, you can **draw the city boundary manually** on the
-  satellite view.
+- **Layered building-data sources**: OSM buildings first; where they are
+  unmapped (common in parts of the US) or the Overpass servers are
+  unreachable (some network filters block them), buildings come from the
+  **USA Structures dataset** (FEMA/Microsoft footprints via ArcGIS — US
+  only); failing that, the city is estimated from OSM **settled-area
+  outlines** (landuse), clearly flagged for review; and where everything
+  is missing you can **draw the city boundary manually** on the satellite
+  view.
 - The city is squared as a north-aligned rectangle (ribua ha'olam) and the
   techum extends 2,000 amos (960 m) from its edge, corners included.
 - **Ir muvla'as (SA HaRav 408:1)**: a neighboring city fully swallowed
@@ -95,6 +97,22 @@ VITE_GOOGLE_MAPS_API_KEY=your-key npm run dev
 
 If the Places API isn't enabled, the app automatically falls back to a plain
 address box using the Geocoder.
+
+### Behind a filtering network (Overpass blocked)
+
+If building data fails with HTTP 403 on every retry, a network filter is
+likely blocking the public OpenStreetMap/Overpass servers. The app
+automatically falls back to the ArcGIS-hosted US building footprints
+(`services.arcgis.com` / `services2.arcgis.com` — make sure those are
+allowed). For a fully reliable setup, deploy the app to Vercel and route
+Overpass through the bundled same-origin proxy ([api/overpass.js](api/overpass.js)):
+
+```bash
+VITE_OVERPASS_PROXY=/api/overpass npm run build
+```
+
+Since the proxy lives on the app's own domain, it works wherever the app
+itself loads.
 
 ## Tests
 

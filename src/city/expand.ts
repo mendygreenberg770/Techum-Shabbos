@@ -1,5 +1,10 @@
 import { detectCity, type CityDetection, type Side } from "./cluster";
-import { fetchBuildingsInRect, fetchSettledAreasInRect } from "./overpass";
+import { fetchBuildingsArcgis } from "./arcgis";
+import {
+  fetchBuildingsInRect,
+  fetchSettledAreasInRect,
+  type FetchedBuilding,
+} from "./overpass";
 import {
   expandBounds,
   metersPerDegree,
@@ -38,10 +43,19 @@ const INITIAL_HALF_M = 1200;
 const STEP_M = 1600;
 const MAX_ITERATIONS = 60;
 
-/** What the city outline is built from: individual building footprints,
- * or settled-area (landuse) outlines as a coarser fallback where OSM has
- * no buildings mapped. */
-export type CitySource = "buildings" | "areas";
+/** What the city outline is built from: OSM building footprints, US
+ * building footprints via ArcGIS (FEMA USA Structures / Microsoft), or
+ * OSM settled-area (landuse) outlines as the coarsest fallback. */
+export type CitySource = "buildings" | "arcgis" | "areas";
+
+const FETCHERS: Record<
+  CitySource,
+  (r: Bounds, signal?: AbortSignal) => Promise<FetchedBuilding[]>
+> = {
+  buildings: fetchBuildingsInRect,
+  arcgis: fetchBuildingsArcgis,
+  areas: fetchSettledAreasInRect,
+};
 
 export async function detectCityExpanding(
   center: LatLng,
@@ -53,8 +67,8 @@ export async function detectCityExpanding(
 ): Promise<ExpandResult> {
   const { perDegLat, perDegLng } = metersPerDegree(center.lat);
   let rect = expandBounds(pointBounds(center), INITIAL_HALF_M);
-  const byId = new Map<number, LatLng[]>();
-  const fetcher = source === "areas" ? fetchSettledAreasInRect : fetchBuildingsInRect;
+  const byId = new Map<number | string, LatLng[]>();
+  const fetcher = FETCHERS[source];
   const minCitySize = source === "areas" ? 1 : undefined;
 
   const fetchInto = async (r: Bounds) => {
@@ -131,10 +145,14 @@ export interface AutoDetectResult extends ExpandResult {
 }
 
 /**
- * Detect the city from building footprints; where OSM has none mapped
- * around the point (common in parts of the US), fall back to settled-area
- * outlines (landuse polygons) as a coarser estimate. The caller flags
- * area-based results for manual review.
+ * Detect the city, trying sources in order of preference:
+ *  1. OSM building footprints (worldwide, community-curated),
+ *  2. US building footprints via ArcGIS (FEMA / Microsoft) — covers
+ *     both OSM gaps and networks whose filters block the Overpass
+ *     servers but allow arcgis.com,
+ *  3. OSM settled-area outlines as a coarse estimate (flagged in the UI).
+ * A source that errors or finds nothing falls through to the next; only
+ * when every source errors does the whole detection fail.
  */
 export async function detectCityAuto(
   center: LatLng,
@@ -143,10 +161,22 @@ export async function detectCityAuto(
   isCancelled?: () => boolean,
   signal?: AbortSignal
 ): Promise<AutoDetectResult> {
-  const buildings = await detectCityExpanding(center, limits, onProgress, isCancelled, signal);
-  if (buildings.detection || isCancelled?.() || signal?.aborted) {
-    return { ...buildings, source: "buildings" };
+  const sources: CitySource[] = ["buildings", "arcgis", "areas"];
+  let lastError: unknown = null;
+  let lastEmpty: AutoDetectResult | null = null;
+  for (const source of sources) {
+    if (isCancelled?.() || signal?.aborted) break;
+    try {
+      const r = await detectCityExpanding(center, limits, onProgress, isCancelled, signal, source);
+      if (r.detection) return { ...r, source };
+      lastEmpty = { ...r, source };
+    } catch (e) {
+      if (isCancelled?.() || signal?.aborted) throw e;
+      lastError = e;
+    }
   }
-  const areas = await detectCityExpanding(center, limits, onProgress, isCancelled, signal, "areas");
-  return { ...areas, source: "areas" };
+  if (lastEmpty) return lastEmpty;
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(lastError ? String(lastError) : "City detection cancelled");
 }

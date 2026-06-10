@@ -580,12 +580,14 @@ export default function App() {
                 )}
                 {noCityFound && cityState.status === "done" && !manualCityBounds && (
                   <div className="warning">
-                    ⚠ Neither buildings nor residential-area outlines are
-                    mapped in OpenStreetMap near this address, so the city
-                    could not be detected — showing the stringent
-                    point-based techum instead. You can draw the city
-                    boundary yourself on the map (use the satellite view to
-                    trace the built-up edge), or retry the data fetch.
+                    ⚠ No buildings were found near this address in any
+                    available dataset (OpenStreetMap buildings, the USA
+                    building footprints via ArcGIS, or OSM settled-area
+                    outlines), so the city could not be detected — showing
+                    the stringent point-based techum instead. You can draw
+                    the city boundary yourself on the map (use the
+                    satellite view to trace the built-up edge), or retry
+                    the data fetch.
                     <div className="saved-actions" style={{ marginTop: 8 }}>
                       <button
                         className="mini-button"
@@ -606,6 +608,15 @@ export default function App() {
                       </button>
                     </div>
                   </div>
+                )}
+                {detection && cityState.source === "arcgis" && (
+                  <p className="muted">
+                    OpenStreetMap building data was unavailable for this
+                    address — building footprints were loaded from the{" "}
+                    <b>USA Structures dataset</b> (FEMA/Microsoft, via
+                    ArcGIS) instead. Same clustering rules apply; US
+                    coverage only.
+                  </p>
                 )}
                 {detection && cityState.source === "areas" && (
                   <p className="warning">
