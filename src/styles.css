@@ -313,6 +313,12 @@ footer {
   padding-top: 10px;
 }
 
+.build-time {
+  margin: 8px 0 0;
+  font-size: 0.72rem;
+  color: #999;
+}
+
 .link-button {
   background: none;
   color: #1a5fb4;

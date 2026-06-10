@@ -90,6 +90,19 @@ const MIN_TOWN_BUILDINGS = 2;
 
 const fmtAmos = (m: number) => Math.round(m / AMAH_M).toLocaleString();
 
+/** When this deployment was built, in US Eastern time (EDT/EST). */
+function formatBuildTime(): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(new Date(__BUILD_TIME__));
+}
+
 export default function App() {
   // Changing the key always goes through a page reload (the Maps script
   // can only be loaded once per page), so this never needs a setter.
@@ -1124,6 +1137,7 @@ export default function App() {
           >
             Change API key
           </button>
+          <p className="build-time">Last updated: {formatBuildTime()}</p>
         </footer>
       </aside>
       <main className="map-wrap">
