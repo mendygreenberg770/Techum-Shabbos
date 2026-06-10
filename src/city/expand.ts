@@ -76,6 +76,14 @@ export async function detectCityExpanding(
   let mixedSources = false;
 
   const fetchInto = async (rects: Bounds[], allowFallback = false) => {
+    // Once OSM has failed this run, stay on the fallback source — no
+    // point re-crawling the dead endpoint cascade every round.
+    if (mixedSources && source === "buildings") {
+      for (const b of await fetchBuildingsArcgis(rects, signal)) {
+        byId.set(b.id, b.ring);
+      }
+      return;
+    }
     try {
       for (const b of await fetcher(rects, signal)) {
         byId.set(b.id, b.ring);

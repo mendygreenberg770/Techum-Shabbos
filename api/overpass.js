@@ -12,7 +12,9 @@ const UPSTREAMS = [
   "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ];
 
-export default async function handler(req, res) {
+// CommonJS on purpose: the repo's package.json has no "type": "module",
+// so this loads correctly on Vercel's Node runtime without extra config.
+module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "POST only" });
     return;
@@ -50,4 +52,4 @@ export default async function handler(req, res) {
     }
   }
   res.status(lastStatus).json({ error: `All Overpass upstreams failed: ${lastText}` });
-}
+};

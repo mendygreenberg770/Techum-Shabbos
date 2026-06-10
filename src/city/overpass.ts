@@ -103,15 +103,28 @@ async function fetchFromEndpoint(
 const queryCache = new Map<string, OverpassElement[]>();
 const QUERY_CACHE_MAX = 120;
 
+/** After every endpoint fails, skip Overpass entirely for a while:
+ * on networks that block it, each analysis would otherwise slow-crawl
+ * through the whole failover cascade before reaching the ArcGIS
+ * fallback. */
+let blockedUntil = 0;
+const COOLDOWN_MS = 60_000;
+
 /** Test hook: module-level cache survives between tests otherwise. */
 export function clearOverpassCache(): void {
   queryCache.clear();
+  blockedUntil = 0;
 }
 
 /** Run a query against the endpoint pool with failover and retry. */
 async function runQuery(query: string, signal?: AbortSignal): Promise<OverpassElement[]> {
   const cached = queryCache.get(query);
   if (cached) return cached;
+  if (Date.now() < blockedUntil) {
+    throw new Error(
+      "Overpass endpoints unavailable (cooling down after repeated failures)"
+    );
+  }
   let lastError: Error = new Error("No Overpass endpoint available");
   for (let pass = 0; pass < RETRY_PASSES; pass++) {
     if (pass > 0) await delay(RETRY_DELAY_MS * pass, signal);
@@ -120,6 +133,7 @@ async function runQuery(query: string, signal?: AbortSignal): Promise<OverpassEl
       try {
         const result = await fetchFromEndpoint(ENDPOINTS[idx], query, signal);
         preferred = idx;
+        blockedUntil = 0;
         queryCache.set(query, result);
         if (queryCache.size > QUERY_CACHE_MAX) {
           queryCache.delete(queryCache.keys().next().value!);
@@ -131,6 +145,7 @@ async function runQuery(query: string, signal?: AbortSignal): Promise<OverpassEl
       }
     }
   }
+  blockedUntil = Date.now() + COOLDOWN_MS;
   throw lastError;
 }
 
