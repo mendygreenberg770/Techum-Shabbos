@@ -52,6 +52,10 @@ export interface CityDetection {
    * to matter for the ir muvla'as din — i.e. within reach of the techum.
    */
   otherCities: Bounds[];
+  /** Member footprints of each entry in `otherCities` (parallel array) —
+   * wall-to-wall distances (e.g., the three-villages din) are measured
+   * from these, not from the squared bounds. */
+  otherCityRings: LatLng[][][];
   /**
    * Sides where one of those neighboring cities reaches the edge of the
    * analyzed area: its true extent continues beyond what was fetched, so
@@ -426,6 +430,7 @@ export function detectCity(
   const reach = expandBounds(bounds, TECHUM_M + KARPEF_M + 100);
   const otherCities: Bounds[] = [];
   const otherRoots = new Set<number>();
+  const otherRootOrder: number[] = [];
   const displayRoots = new Set<number>();
   for (const [r, cb] of clusterBounds) {
     if (r === root) continue;
@@ -435,6 +440,7 @@ export function detectCity(
     if (cb.count >= minCitySize) {
       otherCities.push(b);
       otherRoots.add(r);
+      otherRootOrder.push(r);
     }
   }
 
@@ -444,6 +450,7 @@ export function detectCity(
   const clusterVerts: Vertex[] = [];
   const clusterRings: LatLng[][] = [];
   const neighborRings: LatLng[][] = [];
+  const ringsByRoot = new Map<number, LatLng[][]>();
   const truncated = new Set<Side>();
   const neighborTruncated = new Set<Side>();
   const marginLat = (TWO_CITIES_JOIN_M + 5) / perDegLat;
@@ -454,6 +461,14 @@ export function detectCity(
       clusterRings.push(buildingPolys[i]);
     } else if (displayRoots.has(r)) {
       neighborRings.push(buildingPolys[i]);
+      if (otherRoots.has(r)) {
+        let list = ringsByRoot.get(r);
+        if (!list) {
+          list = [];
+          ringsByRoot.set(r, list);
+        }
+        list.push(buildingPolys[i]);
+      }
     }
     const target =
       r === root ? truncated : otherRoots.has(r) ? neighborTruncated : null;
@@ -491,6 +506,7 @@ export function detectCity(
     truncatedSides: [...truncated],
     neighborTruncatedSides: [...neighborTruncated],
     otherCities,
+    otherCityRings: otherRootOrder.map((r) => ringsByRoot.get(r) ?? []),
     bowGapM: bow?.maxGapM ?? null,
     bowGapRects: bow?.rects ?? [],
     sections,

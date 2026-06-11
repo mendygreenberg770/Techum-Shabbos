@@ -139,3 +139,63 @@ export function boundsContain(bounds: Bounds, p: LatLng): boolean {
     p.lng >= bounds.west
   );
 }
+
+// ---------------------------------------------------------------------------
+// Exact (wall-to-wall) distance between building outlines
+// ---------------------------------------------------------------------------
+
+function pointSegDist2(
+  px: number, py: number,
+  ax: number, ay: number,
+  bx: number, by: number
+): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 === 0 ? 0 : ((px - ax) * dx + (py - ay) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+function orient2(ax: number, ay: number, bx: number, by: number, cx: number, cy: number): number {
+  return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+}
+
+/**
+ * Aerial distance (m) between the closest walls of two building
+ * outlines (0 when they touch or overlap). Used wherever a shiur is
+ * measured between actual structures rather than derived rectangles.
+ */
+export function ringGapM(a: LatLng[], b: LatLng[]): number {
+  const refLat = (a[0].lat + b[0].lat) / 2;
+  const refLng = (a[0].lng + b[0].lng) / 2;
+  const { perDegLat, perDegLng } = metersPerDegree(refLat);
+  const ax = a.map((p) => (p.lng - refLng) * perDegLng);
+  const ay = a.map((p) => (p.lat - refLat) * perDegLat);
+  const bx = b.map((p) => (p.lng - refLng) * perDegLng);
+  const by = b.map((p) => (p.lat - refLat) * perDegLat);
+  let min = Infinity;
+  const na = a.length;
+  const nb = b.length;
+  for (let i = 0; i < na; i++) {
+    const i2 = (i + 1) % na;
+    for (let j = 0; j < nb; j++) {
+      const j2 = (j + 1) % nb;
+      // Segment intersection → touching.
+      const o1 = orient2(ax[i], ay[i], ax[i2], ay[i2], bx[j], by[j]);
+      const o2 = orient2(ax[i], ay[i], ax[i2], ay[i2], bx[j2], by[j2]);
+      const o3 = orient2(bx[j], by[j], bx[j2], by[j2], ax[i], ay[i]);
+      const o4 = orient2(bx[j], by[j], bx[j2], by[j2], ax[i2], ay[i2]);
+      if (o1 * o2 < 0 && o3 * o4 < 0) return 0;
+      min = Math.min(
+        min,
+        pointSegDist2(ax[i], ay[i], bx[j], by[j], bx[j2], by[j2]),
+        pointSegDist2(ax[i2], ay[i2], bx[j], by[j], bx[j2], by[j2]),
+        pointSegDist2(bx[j], by[j], ax[i], ay[i], ax[i2], ay[i2]),
+        pointSegDist2(bx[j2], by[j2], ax[i], ay[i], ax[i2], ay[i2])
+      );
+      if (min === 0) return 0;
+    }
+  }
+  return min;
+}

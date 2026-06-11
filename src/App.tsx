@@ -406,7 +406,16 @@ export default function App() {
     // joins all three into one city — squared together.
     const villages =
       villagesOn && usingCity && cityBounds && !manualCityBounds
-        ? applyThreeVillages(sectionedCity ?? cityBounds, detection?.otherCities ?? [])
+        ? applyThreeVillages(
+            {
+              bounds: sectionedCity ?? cityBounds,
+              rings: detection?.clusterRings,
+            },
+            (detection?.otherCities ?? []).map((b, i) => ({
+              bounds: b,
+              rings: detection?.otherCityRings?.[i],
+            }))
+          )
         : null;
     const effCityBounds = villages ? villages.bounds : sectionedCity ?? cityBounds;
     const otherCities = villages ? villages.remaining : detection?.otherCities ?? [];

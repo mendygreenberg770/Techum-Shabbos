@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyThreeVillages, rectGapM } from "./villages";
+import { applyThreeVillages, rectGapM, type TownShape } from "./villages";
 import { metersPerDegree, type Bounds, type LatLng } from "./geometry";
 
 const C: LatLng = { lat: 40.7, lng: -73.95 };
@@ -17,6 +17,11 @@ function rectM(west: number, south: number, east: number, north: number): Bounds
 
 const mLng = (lng: number) => (lng - C.lng) * perDegLng;
 
+/** A town whose outline is its squared bounds (the bounds fallback). */
+const shape = (b: Bounds): TownShape => ({ bounds: b });
+const join = (user: Bounds, towns: Bounds[]) =>
+  applyThreeVillages(shape(user), towns.map(shape));
+
 describe("three villages in a triangle (SA 398:8)", () => {
   // User city: 200 m wide at the origin.
   const user = rectM(0, 0, 200, 200);
@@ -27,7 +32,7 @@ describe("three villages in a triangle (SA 398:8)", () => {
     // between outers (500 m) ≤ middle width (400) + 135.68 → joins.
     const other = rectM(700, 0, 900, 200);
     const middle = rectM(250, 600, 650, 800);
-    const r = applyThreeVillages(user, [middle, other]);
+    const r = join(user, [middle, other]);
     expect(r.absorbed).toHaveLength(2);
     expect(r.remaining).toHaveLength(0);
     // Combined city squared over all three.
@@ -39,7 +44,7 @@ describe("three villages in a triangle (SA 398:8)", () => {
     // Gap between outers 700 m; middle only 400 m wide → 700 > 535.68.
     const other = rectM(900, 0, 1100, 200);
     const middle = rectM(250, 600, 650, 800);
-    const r = applyThreeVillages(user, [middle, other]);
+    const r = join(user, [middle, other]);
     expect(r.absorbed).toHaveLength(0);
     expect(r.remaining).toHaveLength(2);
   });
@@ -48,7 +53,7 @@ describe("three villages in a triangle (SA 398:8)", () => {
     const other = rectM(700, 0, 900, 200);
     const farMiddle = rectM(2000, 600, 2400, 800); // 1,800 m from the user
     expect(rectGapM(farMiddle, user).dM).toBeGreaterThan(960);
-    expect(applyThreeVillages(user, [farMiddle, other]).absorbed).toHaveLength(0);
+    expect(join(user, [farMiddle, other]).absorbed).toHaveLength(0);
   });
 
   it("joins when the user is the middle village", () => {
@@ -56,7 +61,7 @@ describe("three villages in a triangle (SA 398:8)", () => {
     // (320 m) ≤ the user's width (200) + 135.68.
     const west2 = rectM(-260, 0, -60, 200);
     const east2 = rectM(260, 0, 460, 200);
-    const r = applyThreeVillages(user, [west2, east2]);
+    const r = join(user, [west2, east2]);
     expect(r.absorbed).toHaveLength(2);
     expect(mLng(r.bounds.west)).toBeCloseTo(-260, 1);
     expect(mLng(r.bounds.east)).toBeCloseTo(460, 1);
@@ -67,7 +72,41 @@ describe("three villages in a triangle (SA 398:8)", () => {
     // gap larger than middle-width + 282⅔ amos → nothing joins.
     const a = rectM(600, 0, 800, 200); // gap to user 400 m
     const b = rectM(-600, 0, -400, 200); // gap to user 400 m; a↔b 1,000 m
-    const r = applyThreeVillages(user, [a, b]);
+    const r = join(user, [a, b]);
+    expect(r.absorbed).toHaveLength(0);
+    expect(r.remaining).toHaveLength(2);
+  });
+
+  it("measures wall-to-wall, not from bounding boxes (diagonal tower town)", () => {
+    // The middle "town" is one thin ANTI-DIAGONAL tower: its bounding
+    // box comes within ~403 m of the user, but its actual walls are
+    // ~1,025 m away — beyond 2,000 amos, so the din must NOT join.
+    const towerRing: LatLng[] = [
+      [250, 1600],
+      [260, 1600],
+      [1260, 600],
+      [1250, 600],
+    ].map(([x, y]) => ({ lat: C.lat + y / perDegLat, lng: C.lng + x / perDegLng }));
+    const ringOf = (b: Bounds): LatLng[] => [
+      { lat: b.south, lng: b.west },
+      { lat: b.south, lng: b.east },
+      { lat: b.north, lng: b.east },
+      { lat: b.north, lng: b.west },
+    ];
+    const middleBounds = rectM(250, 600, 1260, 1600);
+    const other = rectM(1300, 0, 1500, 200);
+
+    // Bounds-only fallback (the old behavior) WOULD join:
+    expect(join(user, [middleBounds, other]).absorbed).toHaveLength(2);
+
+    // With the towns' real outlines, it must not:
+    const r = applyThreeVillages(
+      { bounds: user, rings: [ringOf(user)] },
+      [
+        { bounds: middleBounds, rings: [towerRing] },
+        { bounds: other, rings: [ringOf(other)] },
+      ]
+    );
     expect(r.absorbed).toHaveLength(0);
     expect(r.remaining).toHaveLength(2);
   });
@@ -78,7 +117,7 @@ describe("three villages in a triangle (SA 398:8)", () => {
     // After joining (bounds reach x=900), a second triple to the east.
     const middle2 = rectM(950, 600, 1350, 800);
     const other2 = rectM(1400, 0, 1600, 200);
-    const r = applyThreeVillages(user, [middle, other, middle2, other2]);
+    const r = join(user, [middle, other, middle2, other2]);
     expect(r.absorbed).toHaveLength(4);
     expect(mLng(r.bounds.east)).toBeCloseTo(1600, 1);
   });

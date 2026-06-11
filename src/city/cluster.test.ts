@@ -133,6 +133,8 @@ describe("detectCity: other cities (for the ir muvla'as din)", () => {
     )!;
     expect(det.clusterSize).toBe(2);
     expect(det.otherCities).toHaveLength(1);
+    expect(det.otherCityRings).toHaveLength(1);
+    expect(det.otherCityRings[0]).toHaveLength(2); // both member footprints
     const other = det.otherCities[0];
     expect((other.west - C.lng) * perDegLng).toBeCloseTo(495, 1);
     expect((other.east - C.lng) * perDegLng).toBeCloseTo(525, 1);
