@@ -80,8 +80,8 @@ describe("fetchBuildingsInRect", () => {
     const assertion = expect(fetchBuildingsInRect(rect)).rejects.toThrow("HTTP 504");
     await vi.advanceTimersByTimeAsync(10_000);
     await assertion;
-    // 2 passes over 4 endpoints (3 public + the same-origin proxy)
-    expect(fetchMock).toHaveBeenCalledTimes(8);
+    // 2 passes over 5 endpoints (4 public + the same-origin proxy)
+    expect(fetchMock).toHaveBeenCalledTimes(10);
   });
 
   it("serves repeated identical queries from the cache (retry resumes)", async () => {

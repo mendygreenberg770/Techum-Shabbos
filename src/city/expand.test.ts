@@ -142,6 +142,57 @@ describe("detectCityAuto: union of OSM and ArcGIS buildings", () => {
     });
   });
 
+  it("heals a transiently failing OSM round from the backlog (no data loss)", async () => {
+    // Home pair at the center plus a chain reaching the east edge of
+    // the initial ±1,200 m area, forcing an expansion round. The strip
+    // query fails its first full failover cascade (a rate-limit blip),
+    // then succeeds — the backlog retry must recover the strip's
+    // building and report no dataset loss.
+    // The neighbor must be BOTH within muvla reach of the home cluster
+    // (so it is tracked) and within the truncation margin of the
+    // ±1,200 m fetch edge (so an expansion round fires).
+    const { perDegLng } = metersPerDegree(C.lat);
+    const dEdge1 = 1110 / perDegLng;
+    const dEdge2 = 1137 / perDegLng;
+    const dStrip = 1170 / perDegLng;
+    const attempts = new Map<string, number>();
+    let firstBody: string | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+        if (isArcgis(url)) return okJson({ features: [] });
+        const body = String(init?.body ?? "");
+        firstBody ??= body;
+        const n = (attempts.get(body) ?? 0) + 1;
+        attempts.set(body, n);
+        if (body !== firstBody && n <= 10) {
+          // One full cascade (2 passes x 5 endpoints) of failures.
+          return new Response("rate limited", { status: 429 });
+        }
+        return body === firstBody
+          ? okJson({
+              elements: [
+                osmWay(1, 0, 0),
+                osmWay(2, 0, 0.0003),
+                osmWay(3, 0, 0.0006),
+                osmWay(4, 0, 0.0009),
+                osmWay(5, 0, dEdge1),
+                osmWay(6, 0, dEdge2),
+              ],
+            })
+          : okJson({ elements: [osmWay(7, 0, dStrip)] });
+      })
+    );
+    const r = await detectCityAuto(C, LIMITS);
+    // The strip's building was recovered on a later round: all seven
+    // buildings are present (home chain of four + neighbor of three).
+    expect(r.detection!.totalBuildings).toBe(7);
+    expect(r.detection!.clusterSize).toBe(4);
+    expect(r.detection!.otherCities).toHaveLength(1);
+    expect(r.lostDatasets).toBeUndefined();
+    expect(r.fetchError).toBeUndefined();
+  });
+
   it("keeps working when ArcGIS is down (OSM only, not merged)", () => {
     vi.stubGlobal(
       "fetch",

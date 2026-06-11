@@ -50,6 +50,23 @@ export interface ExpandResult {
 const INITIAL_HALF_M = 1200;
 const STEP_M = 1600;
 const MAX_ITERATIONS = 60;
+/** Pause after a fully-failed round before retrying via the backlog —
+ * lets a rate-limited server breathe. Skipped under tests. */
+const FAIL_PAUSE_MS = import.meta.env.MODE === "test" ? 0 : 2500;
+
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(t);
+        resolve();
+      },
+      { once: true }
+    );
+  });
+}
 
 /** What the city outline is built from: OSM building footprints, US
  * building footprints via ArcGIS (FEMA USA Structures / Microsoft), or
@@ -84,8 +101,22 @@ export async function detectCityExpanding(
   // beyond it. Duplicate footprints across datasets overlap and join
   // the same cluster — harmless to the geometry (counts are inflated).
   const simpleFetcher = source === "buildings" ? null : FETCHERS[source];
-  let useOsm = true;
-  let useAgs = true;
+  // Per-dataset recovery state: a failed round no longer turns the
+  // dataset off — its rectangles go into a backlog that is re-attempted
+  // together with the next round's strips (the failure was usually a
+  // transient rate limit). Only several consecutive failed rounds give
+  // up on the dataset; remaining backlog at the end means real holes,
+  // which is reported.
+  interface DatasetState {
+    use: boolean;
+    streak: number;
+    backlog: Map<string, Bounds>;
+  }
+  const MAX_FAIL_STREAK = 3;
+  const MAX_BACKLOG_RECTS = 12;
+  const rectKey = (r: Bounds) => `${r.west},${r.south},${r.east},${r.north}`;
+  const osmState: DatasetState = { use: true, streak: 0, backlog: new Map() };
+  const agsState: DatasetState = { use: true, streak: 0, backlog: new Map() };
   let osmCount = 0;
   let agsCount = 0;
   /** Raw (pre-dedupe) ArcGIS features seen — zero in the initial area
@@ -169,18 +200,36 @@ export async function detectCityExpanding(
       ingest(await simpleFetcher(rects, signal), false);
       return;
     }
-    const tasks: ["osm" | "ags", Promise<FetchedBuilding[]>][] = [];
-    if (useOsm) tasks.push(["osm", fetchBuildingsInRects(rects, signal)]);
-    if (useAgs) tasks.push(["ags", fetchBuildingsArcgis(rects, signal)]);
-    const settled = await Promise.allSettled(tasks.map((t) => t[1]));
+    // Each dataset attempts the new strips PLUS its own backlog of
+    // previously failed rectangles, so a transient failure heals on a
+    // later round instead of leaving an invisible hole.
+    const withBacklog = (st: DatasetState): Bounds[] => {
+      const merged = new Map(st.backlog);
+      for (const r of rects) merged.set(rectKey(r), r);
+      return [...merged.values()];
+    };
+    const tasks: ["osm" | "ags", Bounds[], Promise<FetchedBuilding[]>][] = [];
+    if (osmState.use) {
+      const r = withBacklog(osmState);
+      if (r.length > 0) tasks.push(["osm", r, fetchBuildingsInRects(r, signal)]);
+    }
+    if (agsState.use) {
+      const r = withBacklog(agsState);
+      if (r.length > 0) tasks.push(["ags", r, fetchBuildingsArcgis(r, signal)]);
+    }
+    if (tasks.length === 0) return;
+    const settled = await Promise.allSettled(tasks.map((t) => t[2]));
     let anyOk = false;
     let firstError: unknown = null;
     // OSM is ingested first (authoritative footprints); ArcGIS entries
     // duplicating an accepted building are dropped.
     settled.forEach((r, i) => {
-      const kind = tasks[i][0];
+      const [kind, attempted] = [tasks[i][0], tasks[i][1]];
+      const st = kind === "osm" ? osmState : agsState;
       if (r.status === "fulfilled") {
         anyOk = true;
+        st.streak = 0;
+        st.backlog.clear();
         const accepted = ingest(r.value, kind === "ags");
         if (kind === "osm") {
           osmCount += accepted;
@@ -189,16 +238,18 @@ export async function detectCityExpanding(
           agsCount += accepted;
         }
       } else {
-        // A dataset that failed stays off for the rest of the run — no
-        // re-crawling a dead endpoint cascade every expansion round —
-        // but the loss is reported (see lostDatasets).
         firstError ??= r.reason;
-        if (kind === "osm") {
-          useOsm = false;
-          if (osmCount > 0) lostDatasets.add("OpenStreetMap");
-        } else {
-          useAgs = false;
-          if (agsRaw > 0) lostDatasets.add("US footprints");
+        st.streak++;
+        for (const r2 of attempted) {
+          if (st.backlog.size >= MAX_BACKLOG_RECTS) break;
+          st.backlog.set(rectKey(r2), r2);
+        }
+        if (st.streak >= MAX_FAIL_STREAK) {
+          // Several consecutive failed rounds: stop hammering a dead
+          // endpoint cascade, and report the loss.
+          st.use = false;
+          if (kind === "osm" && osmCount > 0) lostDatasets.add("OpenStreetMap");
+          if (kind === "ags" && agsRaw > 0) lostDatasets.add("US footprints");
         }
       }
     });
@@ -224,8 +275,9 @@ export async function detectCityExpanding(
   // them for the rest of the run instead of querying for nothing.
   // (Raw count, not accepted: where OSM is locally complete every ags
   // building deduplicates away, but the outskirts may still need them.)
-  if (source === "buildings" && agsRaw === 0) useAgs = false;
+  if (source === "buildings" && agsRaw === 0) agsState.use = false;
   let detection: CityDetection | null = null;
+  let finalFlushDone = false;
   for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     detection = detectCity(center, [...byId.values()], rect, minCitySize);
     // Expand while the user's city OR a muvla-relevant neighboring town
@@ -235,6 +287,21 @@ export async function detectCityExpanding(
       ? [...new Set([...detection.truncatedSides, ...detection.neighborTruncatedSides])]
       : [];
     if (!detection || sides.length === 0 || isCancelled?.()) {
+      // Last chance for strips that failed earlier: without this, the
+      // run could end with holes that were never re-attempted (the
+      // backlog only rides along with NEW strips).
+      const pending = osmState.backlog.size > 0 || agsState.backlog.size > 0;
+      if (detection && pending && !isCancelled?.() && !finalFlushDone) {
+        finalFlushDone = true;
+        try {
+          await fetchInto([]);
+          continue; // re-detect with whatever was recovered
+        } catch {
+          // fall through — losses are reported below
+        }
+      }
+      if (osmState.backlog.size > 0 && osmCount > 0) lostDatasets.add("OpenStreetMap");
+      if (agsState.backlog.size > 0 && agsRaw > 0) lostDatasets.add("US footprints");
       return finish({
         detection,
         fetchedRect: rect,
@@ -283,15 +350,25 @@ export async function detectCityExpanding(
       if (isCancelled?.() || signal?.aborted) {
         return finish({ detection, fetchedRect: old, capped: true });
       }
-      // Mid-expansion failure of every remaining dataset: keep the city
-      // detected so far (with its truncation warnings) rather than
-      // discarding everything. The query caches make Retry resume here.
-      return finish({
-        detection,
-        fetchedRect: old,
-        capped: true,
-        fetchError: e instanceof Error ? e.message : String(e),
-      });
+      const allDatasetsDown = simpleFetcher
+        ? true
+        : !osmState.use && !agsState.use;
+      if (allDatasetsDown) {
+        // Every dataset has truly given up: keep the city detected so
+        // far (with its truncation warnings) rather than discarding
+        // everything. The query caches make Retry resume here.
+        return finish({
+          detection,
+          fetchedRect: old,
+          capped: true,
+          fetchError: e instanceof Error ? e.message : String(e),
+        });
+      }
+      // A failed round is usually a transient rate limit: shrink back
+      // to the data we have, breathe, and let the next round retry the
+      // failed strips from the backlog.
+      rect = old;
+      await delay(FAIL_PAUSE_MS, signal).catch(() => undefined);
     }
   }
   return finish({ detection, fetchedRect: rect, capped: true });

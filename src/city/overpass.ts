@@ -12,6 +12,8 @@ const PROXY = (import.meta.env.VITE_OVERPASS_PROXY as string | undefined)?.trim(
 const ENDPOINTS = [
   ...(PROXY ? [PROXY] : []),
   "https://overpass-api.de/api/interpreter",
+  // High-capacity community instance with generous rate limits.
+  "https://overpass.kumi.systems/api/interpreter",
   "https://overpass.private.coffee/api/interpreter",
   "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
   // Same-origin serverless proxy (api/overpass.js) — deployed
@@ -25,6 +27,16 @@ const RETRY_PASSES = 2;
 const RETRY_DELAY_MS = 1500;
 /** Client-side cap per request; the query's own timeout is shorter. */
 const FETCH_TIMEOUT_MS = 90_000;
+/**
+ * Minimum spacing between query starts: the public servers rate-limit
+ * per IP, and a metro expansion fires a query per round back-to-back —
+ * pacing them costs little (each round also computes) and avoids
+ * tripping the limiter mid-analysis. Disabled under tests.
+ */
+const MIN_QUERY_SPACING_MS = import.meta.env.MODE === "test" ? 0 : 1500;
+/** An endpoint that rate-limited us is skipped for this long; others
+ * keep serving in the meantime. */
+const ENDPOINT_COOLDOWN_MS = 45_000;
 
 interface OverpassElement {
   type: string;
@@ -109,11 +121,19 @@ const QUERY_CACHE_MAX = 120;
  * fallback. */
 let blockedUntil = 0;
 const COOLDOWN_MS = 60_000;
+/** Per-endpoint rate-limit cooldowns and the global query pacer. */
+const endpointBlockedUntil = new Map<string, number>();
+let nextQueryAt = 0;
+
+const isRateLimit = (e: unknown): boolean =>
+  /429|rate.?limit|too many|load too high/i.test(e instanceof Error ? e.message : String(e));
 
 /** Test hook: module-level cache survives between tests otherwise. */
 export function clearOverpassCache(): void {
   queryCache.clear();
   blockedUntil = 0;
+  endpointBlockedUntil.clear();
+  nextQueryAt = 0;
 }
 
 /** Run a query against the endpoint pool with failover and retry. */
@@ -125,15 +145,25 @@ async function runQuery(query: string, signal?: AbortSignal): Promise<OverpassEl
       "Overpass endpoints unavailable (cooling down after repeated failures)"
     );
   }
+  const pace = nextQueryAt - Date.now();
+  if (pace > 0) await delay(pace, signal);
+  nextQueryAt = Date.now() + MIN_QUERY_SPACING_MS;
   let lastError: Error = new Error("No Overpass endpoint available");
   for (let pass = 0; pass < RETRY_PASSES; pass++) {
     if (pass > 0) await delay(RETRY_DELAY_MS * pass, signal);
     for (let k = 0; k < ENDPOINTS.length; k++) {
       const idx = (preferred + k) % ENDPOINTS.length;
+      const endpoint = ENDPOINTS[idx];
+      // On the last pass, a rate-limit cooldown is no reason to skip —
+      // a paced retry against a cooling endpoint beats giving up.
+      if (pass < RETRY_PASSES - 1 && Date.now() < (endpointBlockedUntil.get(endpoint) ?? 0)) {
+        continue;
+      }
       try {
-        const result = await fetchFromEndpoint(ENDPOINTS[idx], query, signal);
+        const result = await fetchFromEndpoint(endpoint, query, signal);
         preferred = idx;
         blockedUntil = 0;
+        endpointBlockedUntil.delete(endpoint);
         queryCache.set(query, result);
         if (queryCache.size > QUERY_CACHE_MAX) {
           queryCache.delete(queryCache.keys().next().value!);
@@ -141,11 +171,20 @@ async function runQuery(query: string, signal?: AbortSignal): Promise<OverpassEl
         return result;
       } catch (e) {
         if (signal?.aborted) throw e;
+        if (isRateLimit(e)) {
+          endpointBlockedUntil.set(endpoint, Date.now() + ENDPOINT_COOLDOWN_MS);
+        }
         lastError = e instanceof Error ? e : new Error(String(e));
       }
     }
   }
-  blockedUntil = Date.now() + COOLDOWN_MS;
+  // The global breaker is for networks that block Overpass outright
+  // (fail-fast to the ArcGIS fallback). Rate limiting is transient and
+  // already handled by per-endpoint cooldowns — keep later in-run
+  // retries (the expansion's backlog healing) possible.
+  if (!isRateLimit(lastError)) {
+    blockedUntil = Date.now() + COOLDOWN_MS;
+  }
   throw lastError;
 }
 
