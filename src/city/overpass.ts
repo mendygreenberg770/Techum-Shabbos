@@ -96,6 +96,24 @@ const NON_DIRAH_VALUES = [
 ];
 const NON_DIRAH_REGEX = `^(${NON_DIRAH_VALUES.join("|")})$`;
 
+/** Rings larger than this are decimated before distance math (exact
+ * segment distances are O(n·m) per pair). Dropping vertices can only
+ * cut corners inward — measured gaps grow slightly, a stringency. */
+export function decimateRing(ring: LatLng[], max = 32): LatLng[] {
+  if (ring.length <= max) return ring;
+  const step = ring.length / max;
+  const out: LatLng[] = [];
+  for (let i = 0; i < max; i++) out.push(ring[Math.floor(i * step)]);
+  return out;
+}
+
+/** Buildings with a perimeter above this get their true outline fetched:
+ * a large curved/diagonal structure's bounding box can overstate it by
+ * tens of meters and falsely bridge gaps (towers "joining" across
+ * water). Small houses keep cheap bounding boxes — for them the error
+ * is at most a few meters. */
+const EXACT_GEOM_PERIMETER_M = 100;
+
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const t = setTimeout(resolve, ms);
@@ -265,14 +283,35 @@ export async function fetchBuildingsInRects(
     .map((r) => `way[building~"${NON_DIRAH_REGEX}"](${bboxOf(r)});`)
     .join("");
   const xQuery = `[out:json][timeout:60];(${xUnion});out ids qt;`;
-  const [incRes, excRes] = await Promise.allSettled([
+  // Large structures get their TRUE outline (a third, small query):
+  // measuring from a big tower's bounding box instead of its walls can
+  // falsely join across water. Failure is benign (bbox kept).
+  const gUnion = rects
+    .map(
+      (r) =>
+        `way[building](if: length() > ${EXACT_GEOM_PERIMETER_M})(${bboxOf(r)});`
+    )
+    .join("");
+  const gQuery = `[out:json][timeout:60];(${gUnion});out geom qt;`;
+  const [incRes, excRes, geomRes] = await Promise.allSettled([
     runQuery(query, signal),
     runQuery(xQuery, signal),
+    runQuery(gQuery, signal),
   ]);
   if (incRes.status === "rejected") throw incRes.reason;
   const nonDirahIds = new Set<number>(
     excRes.status === "fulfilled" ? excRes.value.map((el) => el.id) : []
   );
+  const exactRings = new Map<number, LatLng[]>();
+  if (geomRes.status === "fulfilled") {
+    for (const el of geomRes.value) {
+      if (el.type !== "way" || (el.geometry?.length ?? 0) < 3) continue;
+      const pts = el.geometry!.map((g) => ({ lat: g.lat, lng: g.lon }));
+      const last = pts[pts.length - 1];
+      if (last.lat === pts[0].lat && last.lng === pts[0].lng) pts.pop();
+      exactRings.set(el.id, decimateRing(pts));
+    }
+  }
   return incRes.value
     .filter((el) => el.type === "way" && el.bounds)
     .map((el) => {
@@ -280,7 +319,7 @@ export async function fetchBuildingsInRects(
       return {
         id: el.id,
         nonDirah: nonDirahIds.has(el.id) || undefined,
-        ring: [
+        ring: exactRings.get(el.id) ?? [
           { lat: b.minlat, lng: b.minlon },
           { lat: b.minlat, lng: b.maxlon },
           { lat: b.maxlat, lng: b.maxlon },

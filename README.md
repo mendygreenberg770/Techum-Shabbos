@@ -62,16 +62,18 @@ See [DESIGN.md](DESIGN.md) for the full design and roadmap.
 
 The in-app legend lists all map colors.
 
-Known limitations / open halachic items (see DESIGN.md §6): all structures
-are counted as joining the city; buildings are clustered by their bounding
-boxes; the *feasible-region* shading treats the eiruv as a bare point —
-but towns that could carry the eiruv (host-town din, SA HaRav 408) are
-highlighted as placement areas even when no bare-point placement reaches;
-muvla chains are accounted sequentially and piecewise (4 amos per
-swallowed town, credited across the lateral overlap of corridors, so one
-town can produce extensions of different depths side by side);
-feasibility ignores muvla bumps (all stringencies except the bbox
-clustering, which can join slightly more than strict footprints would).
+Known limitations / open halachic items (see DESIGN.md §6 and §9):
+clearly non-dwelling structures (sheds, garages, barns, silos…) are
+excluded per SA 398:6, but ambiguous ones (offices, stores, shuls without
+a resident caretaker) are still counted — the main open shaala; gaps are
+measured wall-to-wall using true outlines for large structures (small
+houses use bounding boxes, an error of at most a few meters); the
+*feasible-region* shading treats the eiruv as a bare point — but towns
+that could carry the eiruv (host-town din, SA HaRav 408) are highlighted
+as placement areas even when no bare-point placement reaches; muvla
+chains are accounted sequentially and piecewise (4 amos per swallowed
+town, credited across the lateral overlap of corridors); feasibility
+ignores muvla bumps.
 
 ## Setup
 

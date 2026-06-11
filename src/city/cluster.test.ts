@@ -210,6 +210,36 @@ describe("detectCity: bow-shaped city (Nesivos Shabbos 42:17)", () => {
   });
 });
 
+describe("detectCity: exact outlines for large structures", () => {
+  it("does not join via a diagonal tower's bounding box (Sunny Isles case)", () => {
+    // A long thin diagonal tower from (0,0) to (310,300): its bounding
+    // box covers the whole square, OVERLAPPING the small house at
+    // (250..260, 0..10) — but the actual walls are ~170 m away. With
+    // the true outline the house must NOT join.
+    const tower: LatLng[] = [
+      [0, 0],
+      [10, 0],
+      [310, 300],
+      [300, 300],
+    ].map(([x, y]) => ({ lat: C.lat + y / perDegLat, lng: C.lng + x / perDegLng }));
+    const det = detectCity(C, [tower, rect(255, 5)], area(2000))!;
+    expect(det.clusterSize).toBe(1);
+    expect(det.otherCities).toHaveLength(0); // lone house is not a town
+  });
+
+  it("joins when the actual walls are within the shiur", () => {
+    const tower: LatLng[] = [
+      [0, 0],
+      [10, 0],
+      [310, 300],
+      [300, 300],
+    ].map(([x, y]) => ({ lat: C.lat + y / perDegLat, lng: C.lng + x / perDegLng }));
+    // House at (210..220, 195..205): nearest wall ≈ a few meters.
+    const det = detectCity(C, [tower, rect(215, 200)], area(2000))!;
+    expect(det.clusterSize).toBe(2);
+  });
+});
+
 describe("detectCity: truncation at the edge of the analyzed area", () => {
   it("flags sides where the cluster reaches the analyzed area's edge", () => {
     const det = detectCity(C, [rect(0, 0), rect(40, 0), rect(80, 0)], area(150))!;

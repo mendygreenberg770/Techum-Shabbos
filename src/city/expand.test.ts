@@ -170,7 +170,10 @@ describe("detectCityAuto: union of OSM and ArcGIS buildings", () => {
       "fetch",
       vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
         if (isArcgis(url)) return okJson({ features: [] });
-        if (isXQuery(init)) return okJson({ elements: [] });
+        const raw = decodeURIComponent(String(init?.body ?? ""));
+        if (isXQuery(init) || raw.includes("if: length()")) {
+          return okJson({ elements: [] });
+        }
         const body = String(init?.body ?? "");
         firstBody ??= body;
         const n = (attempts.get(body) ?? 0) + 1;

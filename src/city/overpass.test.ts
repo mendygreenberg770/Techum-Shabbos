@@ -23,6 +23,9 @@ const building = {
 /** The secondary non-dirah ids query (way[building~"^(shed|…)"]). */
 const isXQuery = (init?: RequestInit) =>
   String(init?.body ?? "").includes("building~");
+/** The large-structure true-outline query ((if: length() > …)). */
+const isGQuery = (init?: RequestInit) =>
+  decodeURIComponent(String(init?.body ?? "")).includes("if: length()");
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -100,7 +103,7 @@ describe("fetchBuildingsInRect", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
-        if (isXQuery(init)) return okJson({ elements: [] });
+        if (isXQuery(init) || isGQuery(init)) return okJson({ elements: [] });
         return ++calls === 1
           ? new Response("rate limited", { status: 429 })
           : okJson({ elements: [building] });
@@ -116,7 +119,7 @@ describe("fetchBuildingsInRect", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
-        if (isXQuery(init)) return okJson({ elements: [] });
+        if (isXQuery(init) || isGQuery(init)) return okJson({ elements: [] });
         return ++calls === 1 ? okJson({ nonsense: true }) : okJson({ elements: [] });
       })
     );
@@ -130,9 +133,9 @@ describe("fetchBuildingsInRect", () => {
     const assertion = expect(fetchBuildingsInRect(rect)).rejects.toThrow("HTTP 504");
     await vi.advanceTimersByTimeAsync(10_000);
     await assertion;
-    // 2 passes over 5 endpoints, for BOTH the building and the
-    // non-dirah query (they run concurrently).
-    expect(fetchMock).toHaveBeenCalledTimes(20);
+    // 2 passes over 5 endpoints, for the building, non-dirah, and
+    // large-geometry queries (all run concurrently).
+    expect(fetchMock).toHaveBeenCalledTimes(30);
   });
 
   it("serves repeated identical queries from the cache (retry resumes)", async () => {
@@ -143,8 +146,8 @@ describe("fetchBuildingsInRect", () => {
     const first = await fetchBuildingsInRect(rect);
     const second = await fetchBuildingsInRect(rect);
     expect(second).toEqual(first);
-    // One building query + one non-dirah query; the repeat is cached.
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Building + non-dirah + large-geometry queries; repeats cached.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("fetches several rectangles as a single union query", async () => {
@@ -160,6 +163,36 @@ describe("fetchBuildingsInRect", () => {
     await fetchBuildingsInRects([rect, other]);
     expect(body.match(/way\[building\]/g)).toHaveLength(2);
     expect(body).toContain("(way[building]");
+  });
+
+  it("uses the true outline for large structures instead of the bbox", async () => {
+    // The large-geometry query returns the same way (id 7) with its
+    // actual L-shaped outline — the building's ring must be the
+    // outline, not the 4-corner bounding box.
+    const geomWay = {
+      type: "way",
+      id: 7,
+      geometry: [
+        { lat: 40.661, lon: -73.949 },
+        { lat: 40.661, lon: -73.948 },
+        { lat: 40.6615, lon: -73.948 },
+        { lat: 40.6615, lon: -73.9485 },
+        { lat: 40.662, lon: -73.9485 },
+        { lat: 40.662, lon: -73.949 },
+        { lat: 40.661, lon: -73.949 },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+        if (isGQuery(init)) return okJson({ elements: [geomWay] });
+        if (isXQuery(init)) return okJson({ elements: [] });
+        return okJson({ elements: [building] });
+      })
+    );
+    const result = await fetchBuildingsInRect(rect);
+    expect(result).toHaveLength(1);
+    expect(result[0].ring).toHaveLength(6); // L-shape, closing node dropped
   });
 
   it("parses settled-area polygons, dropping the closing node", async () => {
@@ -194,8 +227,9 @@ describe("fetchBuildingsInRect", () => {
     expect(bodies[0]).toContain("way[building](");
     expect(bodies[1]).toContain("building~"); // the non-dirah ids query
     expect(bodies[1]).toContain("shed");
-    expect(bodies[2]).toContain("landuse");
-    expect(bodies[2]).toContain("residential");
+    expect(bodies[2]).toContain("if: length()"); // large-structure outlines
+    expect(bodies[3]).toContain("landuse");
+    expect(bodies[3]).toContain("residential");
   });
 
   it("stops immediately when aborted", async () => {
@@ -208,8 +242,8 @@ describe("fetchBuildingsInRect", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     await expect(fetchBuildingsInRect(rect, controller.signal)).rejects.toThrow();
-    // The building query and the concurrent non-dirah query each start
-    // at most once before the abort propagates.
-    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(2);
+    // Each of the three concurrent queries starts at most once before
+    // the abort propagates.
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(3);
   });
 });

@@ -43,23 +43,57 @@ describe("fetchBuildingsArcgis", () => {
     expect(result[0].ring[2].lat).toBeCloseTo(42.9441, 6);
   });
 
-  it("handles MultiPolygon geometry", async () => {
+  it("handles small MultiPolygon geometry as a combined bbox", async () => {
     const feature = {
       id: 9,
       geometry: {
         type: "MultiPolygon",
         coordinates: [
           [[[-78.866, 42.944], [-78.8659, 42.944], [-78.8659, 42.9441], [-78.866, 42.944]]],
-          [[[-78.8655, 42.9445], [-78.8654, 42.9445], [-78.8654, 42.9446], [-78.8655, 42.9445]]],
+          [[[-78.86585, 42.94415], [-78.86575, 42.94415], [-78.86575, 42.94425], [-78.86585, 42.94415]]],
         ],
       },
     };
     vi.stubGlobal("fetch", vi.fn(async () => okJson({ features: [feature] })));
     const result = await fetchBuildingsArcgis([rect]);
     expect(result).toHaveLength(1);
-    // Bbox spans both parts.
+    // Small structure (≤35 m): bbox spans both parts.
+    expect(result[0].ring).toHaveLength(4);
     expect(result[0].ring[0]).toEqual({ lat: 42.944, lng: -78.866 });
-    expect(result[0].ring[2]).toEqual({ lat: 42.9446, lng: -78.8654 });
+    expect(result[0].ring[2]).toEqual({ lat: 42.94425, lng: -78.86575 });
+  });
+
+  it("keeps the true outline for large structures (diagonal towers)", async () => {
+    // A thin diagonal tower ~100 m long: the bbox would cover a square
+    // far larger than the building — the actual outline must be kept.
+    const tower = {
+      id: 12,
+      geometry: {
+        type: "Polygon",
+        coordinates: [
+          [
+            [-78.866, 42.944],
+            [-78.8659, 42.944],
+            [-78.8649, 42.9449],
+            [-78.865, 42.9449],
+            [-78.866, 42.944],
+          ],
+        ],
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => okJson({ features: [tower] })));
+    const result = await fetchBuildingsArcgis([rect]);
+    expect(result).toHaveLength(1);
+    expect(result[0].ring).toHaveLength(4); // the real diagonal quad…
+    // …not an axis-aligned box: some vertex is NOT on the bbox corner grid.
+    const lats = result[0].ring.map((p) => p.lat);
+    const lngs = result[0].ring.map((p) => p.lng);
+    const axisAligned = result[0].ring.every(
+      (p) =>
+        (p.lat === Math.min(...lats) || p.lat === Math.max(...lats)) &&
+        (p.lng === Math.min(...lngs) || p.lng === Math.max(...lngs))
+    );
+    expect(axisAligned).toBe(false);
   });
 
   it("paginates while the transfer limit is exceeded", async () => {

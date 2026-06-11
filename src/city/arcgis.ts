@@ -1,5 +1,5 @@
-import type { Bounds, LatLng } from "../halacha/geometry";
-import { requestSignal, type FetchedBuilding } from "./overpass";
+import { metersPerDegree, type Bounds, type LatLng } from "../halacha/geometry";
+import { decimateRing, requestSignal, type FetchedBuilding } from "./overpass";
 
 /**
  * US building footprints from ArcGIS-hosted open datasets, as a fallback
@@ -52,9 +52,34 @@ function collectPositions(coords: unknown, out: LatLng[]): void {
   for (const c of coords) collectPositions(c, out);
 }
 
-/** North-aligned bounding rectangle of a feature, as a 4-corner ring —
- * the same shape the Overpass `out bb` source produces. */
-function bboxRing(feature: GeoJsonFeature): LatLng[] | null {
+/** A large structure keeps its true outline: a big curved/diagonal
+ * tower's bounding box can overstate it by tens of meters and falsely
+ * bridge gaps. Small houses keep cheap bounding boxes. */
+const EXACT_GEOM_SPAN_M = 35;
+
+/** Collect every ring (array of positions) in a (Multi)Polygon. */
+function collectRings(coords: unknown, out: LatLng[][]): void {
+  if (!Array.isArray(coords) || coords.length === 0) return;
+  const first = coords[0];
+  if (
+    Array.isArray(first) &&
+    first.length >= 2 &&
+    typeof first[0] === "number" &&
+    typeof first[1] === "number"
+  ) {
+    // coords is a ring of positions.
+    out.push(
+      (coords as [number, number][]).map(([lng, lat]) => ({ lat, lng }))
+    );
+    return;
+  }
+  for (const c of coords) collectRings(c, out);
+}
+
+/** The structure's ring: its bounding rectangle when small (the same
+ * shape the Overpass `out bb` source produces), or its true (largest,
+ * decimated) outline when large enough for the bbox error to matter. */
+function featureRing(feature: GeoJsonFeature): LatLng[] | null {
   const pts: LatLng[] = [];
   collectPositions(feature.geometry?.coordinates, pts);
   if (pts.length < 3) return null;
@@ -64,6 +89,37 @@ function bboxRing(feature: GeoJsonFeature): LatLng[] | null {
     minLng = Math.min(minLng, p.lng);
     maxLat = Math.max(maxLat, p.lat);
     maxLng = Math.max(maxLng, p.lng);
+  }
+  const { perDegLat, perDegLng } = metersPerDegree((minLat + maxLat) / 2);
+  const spanM = Math.max(
+    (maxLat - minLat) * perDegLat,
+    (maxLng - minLng) * perDegLng
+  );
+  if (spanM > EXACT_GEOM_SPAN_M) {
+    const rings: LatLng[][] = [];
+    collectRings(feature.geometry?.coordinates, rings);
+    let best: LatLng[] | null = null;
+    let bestArea = -1;
+    for (const ring of rings) {
+      let n = -Infinity, s = Infinity, e = -Infinity, w = Infinity;
+      for (const p of ring) {
+        n = Math.max(n, p.lat);
+        s = Math.min(s, p.lat);
+        e = Math.max(e, p.lng);
+        w = Math.min(w, p.lng);
+      }
+      const area = (n - s) * (e - w);
+      if (area > bestArea) {
+        bestArea = area;
+        best = ring;
+      }
+    }
+    if (best && best.length >= 3) {
+      const pts2 = [...best];
+      const last = pts2[pts2.length - 1];
+      if (last.lat === pts2[0].lat && last.lng === pts2[0].lng) pts2.pop();
+      if (pts2.length >= 3) return decimateRing(pts2);
+    }
   }
   return [
     { lat: minLat, lng: minLng },
@@ -112,7 +168,7 @@ async function fetchFromLayer(
       throw new Error("ArcGIS: malformed response");
     }
     for (const f of data.features) {
-      const ring = bboxRing(f);
+      const ring = featureRing(f);
       if (!ring) continue;
       // Stable id so re-fetched strips dedupe; fall back to the bbox
       // itself when the layer doesn't number its features.
