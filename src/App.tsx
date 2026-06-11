@@ -414,10 +414,24 @@ export default function App() {
           : effCityBounds
         : pointBounds(place.location);
     const techum = expandBounds(base, TECHUM_M);
+    // Other sections of a bow-squared city: each is squared on its own
+    // (green) and generates its own techum (blue) — same city, so its
+    // reach counts in full for muvla, kalsa, and the eiruv planner.
+    const sectionRects = bowSections ? bowSections.slice(1) : [];
+    const sectionBases = sectionRects.map((s) =>
+      karpefOn ? expandBounds(s, KARPEF_M) : s
+    );
+    const sectionTechums = sectionBases.map((b) => expandBounds(b, TECHUM_M));
     const bumps =
       usingCity && effCityBounds
         ? computeMuvlaBumps(base, techum, otherCities, undefined, effCityBounds)
         : [];
+    const sectionBumps = usingCity
+      ? sectionRects.flatMap((s, i) =>
+          computeMuvlaBumps(sectionBases[i], sectionTechums[i], otherCities, undefined, s)
+        )
+      : [];
+    const allBumps = [...bumps, ...sectionBumps];
     const altTechum =
       usingCity && effCityBounds
         ? expandBounds(
@@ -430,10 +444,14 @@ export default function App() {
     // a muvla extension) ends inside of — one may walk only up to the
     // line there; no 4-amos credit. A chain-credited city is excluded:
     // it is reachable in full, so it must not also be painted red.
-    const partialCities = usingCity ? kalsaCities(techum, bumps, otherCities) : [];
+    const partialCities = usingCity
+      ? kalsaCities(techum, allBumps, otherCities, sectionTechums)
+      : [];
 
     const plan =
-      eruvOn && destination ? planEruv(techum, bumps, destination.location) : null;
+      eruvOn && destination
+        ? planEruv(techum, allBumps, destination.location, sectionTechums)
+        : null;
     // Towns detected around the eiruv spot (host town + neighbors for
     // the muvla din), merged with the home-side list; the home city
     // stays first so the "eiruv inside your own town" check keeps its
@@ -461,7 +479,9 @@ export default function App() {
         ? hostTownCandidates(
             techum,
             allCities.filter((c) => c !== effCityBounds),
-            destination.location
+            destination.location,
+            undefined,
+            sectionTechums
           )
         : [];
     const placement =
@@ -470,13 +490,16 @@ export default function App() {
             eruvSpot,
             destination.location,
             techum,
-            plan.feasibleRegion,
+            plan.feasibleRegions,
             allCities,
             undefined,
             // Rashi/Rama 408:1 (the common practice): the home town
             // stays accessible as 4 amos. See ExplainPanel for the
             // other opinions.
-            { ramaHomeCity: usingCity ? effCityBounds : null }
+            {
+              ramaHomeCity: usingCity ? effCityBounds : null,
+              extraHomeTechums: sectionTechums,
+            }
           )
         : null;
 
@@ -510,16 +533,8 @@ export default function App() {
           }
         : null;
 
-    // Other sections of a bow-squared city: each is squared on its own
-    // (green) and generates its own techum (blue) — same city, so no
-    // muvla/kalsa treatment between sections.
-    const sectionRects = bowSections ? bowSections.slice(1) : [];
-    const sectionTechums = sectionRects.map((s) =>
-      expandBounds(karpefOn ? expandBounds(s, KARPEF_M) : s, TECHUM_M)
-    );
-
     let fit = techum;
-    for (const b of bumps) fit = rectUnion(fit, b.bounds);
+    for (const b of allBumps) fit = rectUnion(fit, b.bounds);
     for (const t of sectionTechums) fit = rectUnion(fit, t);
     if (plan && destination && !plan.destinationInHomeTechum) {
       fit = rectUnion(fit, techumFromPoint(destination.location));
@@ -537,6 +552,7 @@ export default function App() {
       techum,
       altTechum,
       bumps,
+      allBumps,
       partialCities,
       plan,
       placement,
@@ -573,7 +589,7 @@ export default function App() {
   const partialCities = view?.partialCities ?? [];
   const hostCandidates = view?.hostCandidates ?? [];
   const eruvReachable = !!(
-    plan?.feasibleRegion ||
+    plan?.feasibleRegions.length ||
     (rotated && rotated.reachable) ||
     hostCandidates.length > 0
   );
@@ -877,9 +893,18 @@ export default function App() {
                     </ul>
                   </div>
                 )}
+                {usingCity && view && view.allBumps.length > view.bumps.length && (
+                  <p className="muted">
+                    {view.allBumps.length - view.bumps.length} additional muvla
+                    extension{view.allBumps.length - view.bumps.length === 1 ? "" : "s"}{" "}
+                    measured from other sections of your city{" "}
+                    {view.allBumps.length - view.bumps.length === 1 ? "is" : "are"}{" "}
+                    shown on the map.
+                  </p>
+                )}
                 {usingCity &&
                   view &&
-                  view.bumps.length === 0 &&
+                  view.allBumps.length === 0 &&
                   (detection?.otherCities.length ?? 0) > 0 && (
                     <p className="muted">
                       Ir muvla'as check (SA HaRav 408:1):{" "}
@@ -911,9 +936,9 @@ export default function App() {
                         squared separately (green) with{" "}
                         {view!.sectionRects.length === 1 ? "its" : "their"} own
                         2,000-amah reach (blue). The open stretches between
-                        sections are <b>not</b> filled in. The eiruv planner
-                        and muvla credits measure from your own section only
-                        (a stringency). Review with a rav.
+                        sections are <b>not</b> filled in. The eiruv planner,
+                        muvla extensions, and kalsa checks account for{" "}
+                        <b>every</b> section's reach. Review with a rav.
                       </>
                     ) : (
                       <>
@@ -1141,7 +1166,7 @@ export default function App() {
                               of the destination. The new techum is drawn as a
                               diamond aimed at the destination.
                             </>
-                          ) : plan!.feasibleRegion ? (
+                          ) : plan!.feasibleRegions.length > 0 ? (
                             <>
                               Click on the map inside the <b>yellow region</b>{" "}
                               (or drag the green eiruv marker) to choose where
@@ -1408,11 +1433,11 @@ export default function App() {
             techumBounds={view?.techum ?? null}
             altTechumBounds={showDetails ? view?.altTechum ?? null : null}
             techumBumps={[
-              ...(view?.bumps.map((b) => b.bounds) ?? []),
+              ...(view?.allBumps.map((b) => b.bounds) ?? []),
               ...(view?.sectionTechums ?? []),
             ]}
             extraCityRects={view?.sectionRects ?? []}
-            swallowedCities={view?.bumps.map((b) => b.city) ?? []}
+            swallowedCities={view?.allBumps.map((b) => b.city) ?? []}
             cityBounds={usingCity ? effCity : null}
             cityOutline={usingCity && !manualCityBounds ? cityOutline : null}
             neighborOutline={neighborOutline}
@@ -1426,7 +1451,7 @@ export default function App() {
                 : []
             }
             destination={eruvOn ? destination : null}
-            feasibleRegion={placingEruv && !rotated ? plan!.feasibleRegion : null}
+            feasibleRegions={placingEruv && !rotated ? plan!.feasibleRegions : []}
             hostPlaceableRects={
               placingEruv && !rotated ? hostCandidates.map((h) => h.placeable) : []
             }

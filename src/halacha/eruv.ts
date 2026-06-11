@@ -38,6 +38,9 @@ export interface EruvPlan {
    * destination is out of range even with an eiruv.
    */
   feasibleRegion: Bounds | null;
+  /** All such regions, including those reached through other sections
+   * of a bow-squared home city (the primary one first when non-null). */
+  feasibleRegions: Bounds[];
 }
 
 export interface EruvPlacement {
@@ -93,13 +96,22 @@ export function hostTownCandidates(
   homeTechum: Bounds,
   cities: Bounds[],
   destination: LatLng,
-  techumMeters: number = TECHUM_M
+  techumMeters: number = TECHUM_M,
+  /** Techums of other sections of a bow-squared home city — equally
+   * valid places to reach an eiruv. */
+  extraHomeTechums: Bounds[] = []
 ): HostCandidate[] {
+  const homeRects = [homeTechum, ...extraHomeTechums];
   const out: HostCandidate[] = [];
   for (const town of cities) {
     if (!boundsContain(expandBounds(town, techumMeters), destination)) continue;
-    const placeable = rectIntersect(expandBounds(town, KARPEF_M), homeTechum);
-    if (placeable) out.push({ town, placeable });
+    for (const home of homeRects) {
+      const placeable = rectIntersect(expandBounds(town, KARPEF_M), home);
+      if (placeable) {
+        out.push({ town, placeable });
+        break;
+      }
+    }
   }
   return out;
 }
@@ -107,16 +119,24 @@ export function hostTownCandidates(
 export function planEruv(
   homeTechum: Bounds,
   homeBumps: MuvlaBump[],
-  destination: LatLng
+  destination: LatLng,
+  /** Techums of other sections of a bow-squared home city: the same
+   * city, so its reach counts in full. */
+  extraHomeTechums: Bounds[] = []
 ): EruvPlan {
+  const homeRects = [homeTechum, ...extraHomeTechums];
   const destinationInHomeTechum =
-    boundsContain(homeTechum, destination) ||
+    homeRects.some((r) => boundsContain(r, destination)) ||
     homeBumps.some((b) => boundsContain(b.bounds, destination));
   // The techum of a point is a north-aligned square, so "destination
   // within the square around E" is equivalent to "E within the square
   // around the destination".
-  const feasibleRegion = rectIntersect(homeTechum, techumFromPoint(destination));
-  return { destinationInHomeTechum, feasibleRegion };
+  const destReach = techumFromPoint(destination);
+  const feasibleRegions = homeRects
+    .map((r) => rectIntersect(r, destReach))
+    .filter((r): r is Bounds => r !== null);
+  const feasibleRegion = rectIntersect(homeTechum, destReach);
+  return { destinationInHomeTechum, feasibleRegion, feasibleRegions };
 }
 
 // ---------------------------------------------------------------------------
@@ -246,7 +266,7 @@ export function placeEruv(
   eruvSpot: LatLng,
   destination: LatLng,
   homeTechum: Bounds,
-  feasibleRegion: Bounds | null,
+  feasibleRegion: Bounds | Bounds[] | null,
   /** All known cities (incl. the home city) for the muvla din. */
   cities: Bounds[],
   techumMeters?: number,
@@ -257,6 +277,9 @@ export function placeEruv(
      * techum. Pass null/omit to follow the stricter view.
      */
     ramaHomeCity?: Bounds | null;
+    /** Techums of other sections of a bow-squared home city — the spot
+     * is reachable from any of them. */
+    extraHomeTechums?: Bounds[];
   }
 ): EruvPlacement {
   const meters = techumMeters ?? TECHUM_M;
@@ -288,10 +311,16 @@ export function placeEruv(
 
   // The yellow region is computed for a bare-point eiruv; a spot whose
   // host-town credit covers the destination is also valid, provided it
-  // is reachable (within the home techum).
-  const reachable = boundsContain(homeTechum, eruvSpot);
+  // is reachable (within the home techum — any section's).
+  const feasibleList = Array.isArray(feasibleRegion)
+    ? feasibleRegion
+    : feasibleRegion
+      ? [feasibleRegion]
+      : [];
+  const homeRects = [homeTechum, ...(opts?.extraHomeTechums ?? [])];
+  const reachable = homeRects.some((r) => boundsContain(r, eruvSpot));
   const inFeasibleRegion =
-    (feasibleRegion !== null && boundsContain(feasibleRegion, eruvSpot)) ||
+    feasibleList.some((r) => boundsContain(r, eruvSpot)) ||
     (reachable && destinationCovered);
 
   return {

@@ -31,7 +31,8 @@ interface Props {
   showRadiusCircle: boolean;
   /** Eiruv planner overlays. */
   destination: SelectedPlace | null;
-  feasibleRegion: Bounds | null;
+  /** Feasible placement regions (one per home-city section). */
+  feasibleRegions: Bounds[];
   /** Corner-rotation kula: placement region ring + destination circle. */
   feasibleRing: LatLng[] | null;
   feasibleCircle: { center: LatLng; radiusM: number } | null;
@@ -191,7 +192,7 @@ export default function MapView(props: Props) {
   const techumRef = useRef<google.maps.Rectangle | null>(null);
   const altRef = useRef<google.maps.Rectangle | null>(null);
   const cityRef = useRef<google.maps.Rectangle | null>(null);
-  const feasibleRef = useRef<google.maps.Rectangle | null>(null);
+  const feasiblePool = useRef<google.maps.Rectangle[]>([]);
   const newTechumRef = useRef<google.maps.Rectangle | null>(null);
   const cityOutlineRef = useRef<google.maps.Polygon | null>(null);
   const neighborOutlineRef = useRef<google.maps.Polygon | null>(null);
@@ -262,7 +263,7 @@ export default function MapView(props: Props) {
     cityEditable,
     showRadiusCircle,
     destination,
-    feasibleRegion,
+    feasibleRegions,
     feasibleRing,
     feasibleCircle,
     hostPlaceableRects,
@@ -422,22 +423,14 @@ export default function MapView(props: Props) {
       destMarkerRef.current.setMap(null);
     }
 
-    if (!feasibleRef.current) {
-      feasibleRef.current = new google.maps.Rectangle({
-        strokeColor: "#b48800",
-        strokeOpacity: 0.9,
-        strokeWeight: 1.5,
-        fillColor: "#f5c211",
-        fillOpacity: 0.18,
-        clickable: false,
-      });
-    }
-    if (feasibleRegion) {
-      feasibleRef.current.setBounds(toGBounds(feasibleRegion));
-      feasibleRef.current.setMap(map);
-    } else {
-      feasibleRef.current.setMap(null);
-    }
+    syncRects(feasiblePool.current, map, feasibleRegions, {
+      strokeColor: "#b48800",
+      strokeOpacity: 0.9,
+      strokeWeight: 1.5,
+      fillColor: "#f5c211",
+      fillOpacity: 0.18,
+      clickable: false,
+    });
 
     syncRects(hostPlaceablePool.current, map, hostPlaceableRects, HOST_PLACEABLE_STYLE);
 

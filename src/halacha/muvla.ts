@@ -83,16 +83,18 @@ const EPS_M = 0.5;
 export function kalsaCities(
   techum: Bounds,
   bumps: MuvlaBump[],
-  cities: Bounds[]
+  cities: Bounds[],
+  /** Techums of other sections of a bow-squared home city — equally
+   * reachable, so a town fully inside one is not blocked. */
+  extraTechums: Bounds[] = []
 ): Bounds[] {
+  const reachable = [techum, ...extraTechums, ...bumps.map((b) => b.bounds)];
   return cities.filter((c) => {
     if (bumps.some((b) => b.city === c)) return false;
-    const cutByBase =
-      rectIntersect(c, techum) !== null && !rectContainedIn(c, techum);
-    const cutByBump = bumps.some(
-      (b) => rectIntersect(c, b.bounds) !== null && !rectContainedIn(c, b.bounds)
-    );
-    return cutByBase || cutByBump;
+    // Fully inside any single reachable rectangle → fully reachable.
+    if (reachable.some((r) => rectContainedIn(c, r))) return false;
+    // Otherwise: a boundary cuts through it → kalsa midaso there.
+    return reachable.some((r) => rectIntersect(c, r) !== null);
   });
 }
 

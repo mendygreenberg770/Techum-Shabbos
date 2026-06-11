@@ -164,3 +164,70 @@ describe("scenario: eiruv techumin into a host town", () => {
     expect(placement.hostCity).toBe(home);
   });
 });
+
+describe("scenario: bow-squared city — other sections' reach counts in full", () => {
+  // The user's section around C (±200 m); another section of the SAME
+  // city 3 km east (beyond the primary techum's reach at 1,160 m).
+  const userSection = expandBounds(pointBounds(C), 200);
+  const primaryTechum = expandBounds(userSection, TECHUM_M); // edge 1,160
+  const farSection: Bounds = {
+    north: C.lat + 200 / perDegLat,
+    south: C.lat - 200 / perDegLat,
+    west: C.lng + 3000 / perDegLng,
+    east: C.lng + 3600 / perDegLng,
+  };
+  const sectionTechum = expandBounds(farSection, TECHUM_M); // 2,040..4,560
+
+  it("a destination near the far section needs no eiruv", () => {
+    const dest: LatLng = { lat: C.lat, lng: C.lng + 4200 / perDegLng };
+    const plan = planEruv(primaryTechum, [], dest, [sectionTechum]);
+    expect(plan.destinationInHomeTechum).toBe(true);
+  });
+
+  it("feasible placement regions come from every section", () => {
+    // Destination 5.2 km east: beyond both, but reachable by an eiruv
+    // placed within the far section's techum.
+    const dest: LatLng = { lat: C.lat, lng: C.lng + 5200 / perDegLng };
+    const plan = planEruv(primaryTechum, [], dest, [sectionTechum]);
+    expect(plan.destinationInHomeTechum).toBe(false);
+    expect(plan.feasibleRegion).toBeNull(); // primary can't reach
+    expect(plan.feasibleRegions.length).toBe(1); // the far section can
+
+    const spot: LatLng = { lat: C.lat, lng: C.lng + 4400 / perDegLng };
+    const placement = placeEruv(spot, dest, primaryTechum, plan.feasibleRegions, [], undefined, {
+      extraHomeTechums: [sectionTechum],
+    });
+    expect(placement.inFeasibleRegion).toBe(true);
+    expect(placement.destinationCovered).toBe(true);
+  });
+
+  it("host towns reachable only via the far section are offered", () => {
+    const dest: LatLng = { lat: C.lat, lng: C.lng + 6000 / perDegLng };
+    const town: Bounds = {
+      north: C.lat + 100 / perDegLat,
+      south: C.lat - 100 / perDegLat,
+      west: C.lng + 4300 / perDegLng,
+      east: C.lng + 5200 / perDegLng,
+    };
+    const viaPrimary = hostTownCandidates(primaryTechum, [town], dest);
+    expect(viaPrimary).toHaveLength(0);
+    const viaSections = hostTownCandidates(primaryTechum, [town], dest, undefined, [sectionTechum]);
+    expect(viaSections).toHaveLength(1);
+  });
+
+  it("a town fully inside another section's techum is not kalsa", () => {
+    const town: Bounds = {
+      north: C.lat + 100 / perDegLat,
+      south: C.lat - 100 / perDegLat,
+      west: C.lng + 1000 / perDegLng,
+      east: C.lng + 2500 / perDegLng,
+    };
+    // Cut by the primary techum line (edge 1,160) but fully within the
+    // far section's techum (2,040..4,560)? No — spans 1,000..2,500,
+    // not contained in either alone → genuinely kalsa.
+    expect(kalsaCities(primaryTechum, [], [town], [sectionTechum])).toEqual([town]);
+    // A town fully inside the far section's techum is cleared.
+    const inner: Bounds = { ...town, west: C.lng + 2100 / perDegLng };
+    expect(kalsaCities(primaryTechum, [], [inner], [sectionTechum])).toEqual([]);
+  });
+});
