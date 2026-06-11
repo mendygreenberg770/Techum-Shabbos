@@ -49,7 +49,52 @@ export interface FetchedBuilding {
   id: number | string;
   /** Building outline as its bounding rectangle (4 corners). */
   ring: LatLng[];
+  /** Clearly NOT a beis dirah (shed/garage/barn/silo…): such a
+   * structure does not join a city (SA 398:6) — it is excluded from the
+   * chain but still registered so the other dataset can't re-add it. */
+  nonDirah?: boolean;
 }
+
+/**
+ * OSM building values that are clearly not batei dirah — structures
+ * without (and not made for) human dwelling, which do not extend a city
+ * (the principle of SA OC 398:6: a bridge/storehouse/monument joins
+ * only WITH a dwelling). Deliberately conservative: anything arguably
+ * dwelling-like (hut, cabin, guardhouse — the Gemara's burganin) stays
+ * counted, and ambiguous categories (offices, shuls, factories) remain
+ * counted as the genuinely open shaala.
+ */
+const NON_DIRAH_VALUES = [
+  "shed",
+  "garage",
+  "garages",
+  "carport",
+  "greenhouse",
+  "barn",
+  "stable",
+  "sty",
+  "cowshed",
+  "farm_auxiliary",
+  "silo",
+  "water_tower",
+  "storage_tank",
+  "slurry_tank",
+  "tank",
+  "roof",
+  "ruins",
+  "collapsed",
+  "transformer_tower",
+  "service",
+  "kiosk",
+  "toilets",
+  "hangar",
+  "bunker",
+  "digester",
+  "construction",
+  "container",
+  "garbage_shed",
+];
+const NON_DIRAH_REGEX = `^(${NON_DIRAH_VALUES.join("|")})$`;
 
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -212,13 +257,29 @@ export async function fetchBuildingsInRects(
   if (rects.length === 0) return [];
   const union = rects.map((r) => `way[building](${bboxOf(r)});`).join("");
   const query = `[out:json][timeout:60];(${union});out ids bb qt;`;
-  const elements = await runQuery(query, signal);
-  return elements
+  // The non-dirah structures are identified by a second, much smaller
+  // ids-only query (fetching every building's tags would multiply the
+  // payload). Its failure is benign: the structures are then merely
+  // counted as before (a kula left in place, not a data hole).
+  const xUnion = rects
+    .map((r) => `way[building~"${NON_DIRAH_REGEX}"](${bboxOf(r)});`)
+    .join("");
+  const xQuery = `[out:json][timeout:60];(${xUnion});out ids qt;`;
+  const [incRes, excRes] = await Promise.allSettled([
+    runQuery(query, signal),
+    runQuery(xQuery, signal),
+  ]);
+  if (incRes.status === "rejected") throw incRes.reason;
+  const nonDirahIds = new Set<number>(
+    excRes.status === "fulfilled" ? excRes.value.map((el) => el.id) : []
+  );
+  return incRes.value
     .filter((el) => el.type === "way" && el.bounds)
     .map((el) => {
       const b = el.bounds!;
       return {
         id: el.id,
+        nonDirah: nonDirahIds.has(el.id) || undefined,
         ring: [
           { lat: b.minlat, lng: b.minlon },
           { lat: b.minlat, lng: b.maxlon },

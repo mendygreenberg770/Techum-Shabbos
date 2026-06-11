@@ -575,36 +575,36 @@ function bowGaps(
   // legitimately filled cells around the user. Everything in it may be
   // squared in; using it instead of the full bounding box is a
   // stringency offered when the full square fails the bow rule.
+  // The fill rule, taken at its plain meaning (Nesivos Shabbos 42:17):
+  // open cells may be "filled in" only when the BUILT ends flanking
+  // them — along either axis — are within 4,000 amos. Fill is computed
+  // from the original occupancy only: previously filled (empty) cells
+  // do not beget further fill, so the fill cannot compound across
+  // chained pockets.
   const MAX_FILL_STEPS = Math.floor(LIMIT / CELL) + 1; // cell-index diff ≤ 10
   const filled = new Map<number, Set<number>>();
   for (const [cy, set] of occupied) filled.set(cy, new Set(set));
-  const fillLines = (transpose: boolean) => {
-    // Collect per-line sorted cells (rows when !transpose, else columns).
-    const lines = new Map<number, number[]>();
-    for (const [cy, set] of filled) {
-      for (const cx of set) {
-        const line = transpose ? cx : cy;
-        const along = transpose ? cy : cx;
-        if (!lines.has(line)) lines.set(line, []);
-        lines.get(line)!.push(along);
-      }
-    }
-    for (const [line, cells] of lines) {
-      const sorted = [...new Set(cells)].sort((a, b) => a - b);
+  const markFilled = (cy: number, cx: number) => {
+    if (!filled.has(cy)) filled.set(cy, new Set());
+    filled.get(cy)!.add(cx);
+  };
+  const fillFromOriginal = (
+    lines: Map<number, Set<number>>,
+    transpose: boolean
+  ) => {
+    for (const [line, cellsInLine] of lines) {
+      const sorted = [...cellsInLine].sort((a, b) => a - b);
       for (let i = 1; i < sorted.length; i++) {
         if (sorted[i] - sorted[i - 1] > MAX_FILL_STEPS) continue;
         for (let a = sorted[i - 1] + 1; a < sorted[i]; a++) {
-          const cy = transpose ? a : line;
-          const cx = transpose ? line : a;
-          if (!filled.has(cy)) filled.set(cy, new Set());
-          filled.get(cy)!.add(cx);
+          if (transpose) markFilled(a, line);
+          else markFilled(line, a);
         }
       }
     }
   };
-  fillLines(false);
-  fillLines(true);
-  fillLines(false);
+  fillFromOriginal(occupied, false); // rows of built cells
+  fillFromOriginal(occupiedT, true); // columns of built cells
 
   const isFilled = (cy: number, cx: number) => filled.get(cy)?.has(cx) ?? false;
 

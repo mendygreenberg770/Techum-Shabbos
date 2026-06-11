@@ -44,6 +44,9 @@ const agsFeature = (id: number, dLat: number, dLng: number) => ({
 });
 
 const isArcgis = (url: RequestInfo | URL) => String(url).includes("arcgis.com");
+/** The secondary non-dirah ids query (way[building~"^(shed|…)"]). */
+const isXQuery = (init?: RequestInit) =>
+  String(init?.body ?? "").includes("building~");
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -59,10 +62,12 @@ describe("detectCityAuto: union of OSM and ArcGIS buildings", () => {
     const dLng60 = 0.00072;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url: RequestInfo | URL) =>
+      vi.fn(async (url: RequestInfo | URL, init?: RequestInit) =>
         isArcgis(url)
           ? okJson({ features: [agsFeature(1, 0, dLng30)] })
-          : okJson({ elements: [osmWay(1, 0, 0), osmWay(2, 0, dLng60)] })
+          : isXQuery(init)
+            ? okJson({ elements: [] })
+            : okJson({ elements: [osmWay(1, 0, 0), osmWay(2, 0, dLng60)] })
       )
     );
     return detectCityAuto(C, LIMITS).then((r) => {
@@ -93,7 +98,7 @@ describe("detectCityAuto: union of OSM and ArcGIS buildings", () => {
     // duplicates must not inflate counts (they burn the analysis limit).
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url: RequestInfo | URL) =>
+      vi.fn(async (url: RequestInfo | URL, init?: RequestInit) =>
         isArcgis(url)
           ? okJson({
               features: [
@@ -102,7 +107,9 @@ describe("detectCityAuto: union of OSM and ArcGIS buildings", () => {
                 agsFeature(3, 0, 0.0006),
               ],
             })
-          : okJson({ elements: [osmWay(1, 0, 0), osmWay(2, 0, 0.0003)] })
+          : isXQuery(init)
+            ? okJson({ elements: [] })
+            : okJson({ elements: [osmWay(1, 0, 0), osmWay(2, 0, 0.0003)] })
       )
     );
     return detectCityAuto(C, LIMITS).then((r) => {
@@ -120,17 +127,19 @@ describe("detectCityAuto: union of OSM and ArcGIS buildings", () => {
     const { perDegLng } = metersPerDegree(C.lat);
     const d1 = 1100 / perDegLng;
     const d2 = 1130 / perDegLng;
-    const fetchMock = vi.fn(async (url: RequestInfo | URL) =>
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) =>
       isArcgis(url)
         ? okJson({ features: [] })
-        : okJson({
-            elements: [
-              osmWay(1, 0, 0),
-              osmWay(2, 0, 0.0003),
-              osmWay(3, 0, d1),
-              osmWay(4, 0, d2),
-            ],
-          })
+        : isXQuery(init)
+          ? okJson({ elements: [] })
+          : okJson({
+              elements: [
+                osmWay(1, 0, 0),
+                osmWay(2, 0, 0.0003),
+                osmWay(3, 0, d1),
+                osmWay(4, 0, d2),
+              ],
+            })
     );
     vi.stubGlobal("fetch", fetchMock);
     return detectCityAuto(C, LIMITS).then((r) => {
@@ -161,6 +170,7 @@ describe("detectCityAuto: union of OSM and ArcGIS buildings", () => {
       "fetch",
       vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
         if (isArcgis(url)) return okJson({ features: [] });
+        if (isXQuery(init)) return okJson({ elements: [] });
         const body = String(init?.body ?? "");
         firstBody ??= body;
         const n = (attempts.get(body) ?? 0) + 1;
@@ -193,13 +203,44 @@ describe("detectCityAuto: union of OSM and ArcGIS buildings", () => {
     expect(r.fetchError).toBeUndefined();
   });
 
+  it("excludes non-dwelling structures from the chain (SA 398:6) without resurrection", () => {
+    // Houses at 0 m and 25 m chain; a SHED at 50 m would chain a fourth
+    // house at 75 m — but a shed does not join a city, so the fourth
+    // house stays a separate structure. ArcGIS also reports the shed
+    // (unclassified) — its copy must not resurrect the excluded one.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: RequestInfo | URL, init?: RequestInit) =>
+        isArcgis(url)
+          ? okJson({ features: [agsFeature(9, 0, 0.0006)] })
+          : isXQuery(init)
+            ? okJson({ elements: [{ type: "way", id: 3 }] })
+            : okJson({
+                elements: [
+                  osmWay(1, 0, 0),
+                  osmWay(2, 0, 0.0003),
+                  osmWay(3, 0, 0.0006), // the shed
+                  osmWay(4, 0, 0.0009),
+                ],
+              })
+      )
+    );
+    return detectCityAuto(C, LIMITS).then((r) => {
+      expect(r.excludedCount).toBe(1);
+      expect(r.detection!.totalBuildings).toBe(3); // shed not counted
+      expect(r.detection!.clusterSize).toBe(2); // chain broken at the shed
+    });
+  });
+
   it("keeps working when ArcGIS is down (OSM only, not merged)", () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url: RequestInfo | URL) =>
+      vi.fn(async (url: RequestInfo | URL, init?: RequestInit) =>
         isArcgis(url)
           ? new Response("nope", { status: 503 })
-          : okJson({ elements: [osmWay(1, 0, 0), osmWay(2, 0, 0.0003)] })
+          : isXQuery(init)
+            ? okJson({ elements: [] })
+            : okJson({ elements: [osmWay(1, 0, 0), osmWay(2, 0, 0.0003)] })
       )
     );
     return detectCityAuto(C, LIMITS).then((r) => {

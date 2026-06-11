@@ -98,6 +98,34 @@ describe("fetchBuildingsArcgis", () => {
     expect(call).toBe(2);
   });
 
+  it("marks Agriculture / Utility and Misc structures as non-dirah", async () => {
+    const classed = (id: number, occ: string | undefined, dLng: number) => ({
+      ...polygonFeature(id, -78.866 + dLng, 42.944),
+      properties: occ ? { OCC_CLS: occ } : undefined,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        okJson({
+          features: [
+            classed(1, "Residential", 0),
+            classed(2, "Agriculture", 0.001),
+            classed(3, "Utility and Misc", 0.002),
+            classed(4, "Commercial", 0.003),
+            classed(5, undefined, 0.004),
+          ],
+        })
+      )
+    );
+    const result = await fetchBuildingsArcgis([rect]);
+    const byEnd = (id: number) => result.find((b) => String(b.id).endsWith(`:${id}`))!;
+    expect(byEnd(1).nonDirah).toBeUndefined();
+    expect(byEnd(2).nonDirah).toBe(true);
+    expect(byEnd(3).nonDirah).toBe(true);
+    expect(byEnd(4).nonDirah).toBeUndefined(); // ambiguous — stays counted
+    expect(byEnd(5).nonDirah).toBeUndefined();
+  });
+
   it("returns empty outside US coverage rather than failing", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => okJson({ features: [] })));
     await expect(fetchBuildingsArcgis([rect])).resolves.toEqual([]);

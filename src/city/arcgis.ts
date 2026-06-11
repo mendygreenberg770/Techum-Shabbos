@@ -17,9 +17,19 @@ import { requestSignal, type FetchedBuilding } from "./overpass";
  * the caller moves on to the next source.
  */
 const LAYERS = [
-  "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/USA_Structures_View/FeatureServer/0",
-  "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/MSBFP2/FeatureServer/0",
+  {
+    url: "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/USA_Structures_View/FeatureServer/0",
+    // FEMA's occupancy class: Agriculture (barns/silos) and Utility and
+    // Misc (water towers, pump houses…) are clearly not batei dirah and
+    // do not join a city (SA 398:6). Other classes stay counted.
+    outFields: "OCC_CLS",
+  },
+  {
+    url: "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/MSBFP2/FeatureServer/0",
+    outFields: "",
+  },
 ];
+const NON_DIRAH_OCC = new Set(["Agriculture", "Utility and Misc"]);
 let preferred = 0;
 
 const PAGE_SIZE = 2000;
@@ -29,6 +39,7 @@ const MAX_PAGES = 50;
 interface GeoJsonFeature {
   id?: number | string;
   geometry?: { type?: string; coordinates?: unknown } | null;
+  properties?: { OCC_CLS?: string } | null;
 }
 
 /** Collect every [lng, lat] position in a (Multi)Polygon coordinates array. */
@@ -63,7 +74,7 @@ function bboxRing(feature: GeoJsonFeature): LatLng[] | null {
 }
 
 async function fetchFromLayer(
-  layerUrl: string,
+  layer: { url: string; outFields: string },
   layerIdx: number,
   rect: Bounds,
   signal?: AbortSignal
@@ -79,12 +90,12 @@ async function fetchFromLayer(
       spatialRel: "esriSpatialRelIntersects",
       returnGeometry: "true",
       geometryPrecision: "6",
-      outFields: "",
+      outFields: layer.outFields,
       f: "geojson",
       resultOffset: String(page * PAGE_SIZE),
       resultRecordCount: String(PAGE_SIZE),
     });
-    const res = await fetch(`${layerUrl}/query?${params}`, {
+    const res = await fetch(`${layer.url}/query?${params}`, {
       signal: requestSignal(signal),
     });
     if (!res.ok) throw new Error(`ArcGIS returned HTTP ${res.status}`);
@@ -109,7 +120,12 @@ async function fetchFromLayer(
         f.id != null
           ? `a${layerIdx}:${f.id}`
           : `a${layerIdx}:${ring[0].lat},${ring[0].lng},${ring[2].lat},${ring[2].lng}`;
-      out.push({ id, ring });
+      const occ = f.properties?.OCC_CLS;
+      out.push({
+        id,
+        ring,
+        nonDirah: (occ && NON_DIRAH_OCC.has(occ)) || undefined,
+      });
     }
     const exceeded =
       data.properties?.exceededTransferLimit ?? data.exceededTransferLimit ?? false;

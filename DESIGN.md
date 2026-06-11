@@ -274,3 +274,45 @@ Shulchan Aruch HaRav:**
    per Ketzos HaShulchan; encode as checklist guidance.
 7. **Shiur of the two meals** for the eiruv food, per Reb Chaim Naeh's
    measures — exact quantities to display.
+
+## 9. Psak policy — decided defaults vs. genuine shaalos
+
+The app's policy is to PASKEN wherever the sources give a clear answer,
+and to reserve "ask a rav" for questions that are genuinely contested.
+
+**Decided in the app (with basis):**
+
+1. **Clearly non-dwelling structures do not join the city.** Sheds,
+   garages, barns, stables, silos, water towers, tanks, greenhouses,
+   ruins, and the like are excluded from the chain — the explicit
+   principle of SA 398:6 (a bridge/storehouse/monument joins only WITH a
+   beis dirah). Identified from OSM building tags and FEMA's occupancy
+   class (Agriculture / Utility and Misc); anything arguably
+   dwelling-like (huts, cabins, guardhouses — the Gemara's burganin)
+   stays counted. The exclusion count is shown.
+2. **No karpef for a single city** (default): the Mechaber's stam and
+   the Mishnah Berurah; the toggle exposes the lenient view, on which
+   "one need not protest."
+3. **Bow/keshes squaring**: open land is squared in only where flanked
+   by BUILT ends within 4,000 amos along some axis, computed without
+   compounding through filled land (plain reading of Nesivos Shabbos
+   42:17); otherwise the city is squared in sections automatically.
+4. **A town = two or more chained structures** for the 141⅓-amah join:
+   no counter-shiur appears in the poskim, and the contemporary
+   bungalow-colony literature treats small clusters of dwellings as
+   towns.
+5. **Rama 408:1** (home town stays 4 amos) — applied, common practice.
+6. **Sequential/piecewise muvla accounting; rivers and roads do not
+   split a city** (SA HaRav 398) — applied.
+
+**The remaining genuine shaalos (flagged in the UI):**
+
+1. **Ambiguous structures**: offices, stores, factories, schools, and
+   shuls without a resident caretaker — counted today; whether they join
+   is a real machlokes/judgment.
+2. **Corner-rotation kula** for a personal eiruv square — opt-in only.
+3. **Three-villages din**: normative, but the app's bound-based
+   measurement is slightly lenient — borderline gaps should be verified
+   (ruler) or asked.
+4. **Hilly terrain** (rope-measurement vs. aerial) — disclaimer stands.
+5. **Practical reliance** — a rav must approve an actual route/eiruv.

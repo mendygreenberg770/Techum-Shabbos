@@ -84,6 +84,8 @@ interface CityState {
   /** Datasets that contributed and then failed mid-run — the city may
    * have invisible coverage holes (chains break mid-street). */
   lostDatasets?: string[];
+  /** Structures excluded as clearly not batei dirah (SA 398:6). */
+  excludedCount?: number;
 }
 
 interface EruvCityState {
@@ -241,6 +243,7 @@ export default function App() {
           source: result.source,
           merged: result.merged,
           lostDatasets: result.lostDatasets,
+          excludedCount: result.excludedCount,
         });
         setProgress(null);
       })
@@ -836,6 +839,19 @@ export default function App() {
                     )}
                     {truncated.length === 0 &&
                       " The entire contiguous city was captured."}
+                    {(cityState.excludedCount ?? 0) > 0 && (
+                      <>
+                        {" "}
+                        {cityState.excludedCount!.toLocaleString()} structure
+                        {cityState.excludedCount === 1 ? "" : "s"} tagged as
+                        clearly not dwellings (sheds, garages, barns, silos,
+                        water towers) were <b>excluded</b> from the chain — a
+                        structure without a beis dirah does not extend a city
+                        (SA 398:6). Structures whose status is a genuine
+                        shaala (offices, stores, shuls without a resident
+                        caretaker) remain counted.
+                      </>
+                    )}
                   </p>
                 )}
                 {detection && detection.neighborTruncatedSides.length > 0 && (
@@ -954,13 +970,12 @@ export default function App() {
                         {" "}Open stretches up to ≈
                         {Math.round(detection.bowGapM).toLocaleString()} m
                         exist <b>along one axis</b> (magenta) — but each is
-                        flanked by built areas within 4,000 amos along the{" "}
-                        <i>other</i> axis, so the fill can stand on that
-                        basis and the single square was kept. Whether
-                        cross-axis flanking suffices to "square in" such a
-                        pocket is a judgment call — review with a rav, and
-                        adjust the boundary manually to exclude the pocket
-                        if ruled stringently.
+                        flanked by <b>built</b> areas within 4,000 amos along
+                        the <i>other</i> axis, so per the rule's plain
+                        meaning the open land may be squared in and the
+                        single square stands. (Fill never compounds through
+                        previously filled land.) The magenta highlights stay
+                        so the basis is visible.
                       </>
                     )}
                   </div>
@@ -986,9 +1001,11 @@ export default function App() {
                         onChange={(e) => setKarpefOn(e.target.checked)}
                       />
                       Add karpef (70⅔ amos ≈ {KARPEF_M.toFixed(1)} m) around
-                      the city before measuring (the other view's comparison
-                      line shows in gray with details on — see "How this was
-                      calculated").
+                      the city before measuring. The default (off) follows
+                      the psak: the Mechaber's stam and the Mishnah Berurah
+                      give no karpef to a single city; the lenient view
+                      exists and "one need not protest" those who rely on it
+                      (the comparison line shows in gray with details on).
                     </label>
                     <label className="toggle">
                       <input
@@ -998,8 +1015,11 @@ export default function App() {
                       />
                       Three-villages din (SA 398:8): join two outer towns
                       through a middle village that, "viewed as between"
-                      them, would leave ≤ 141⅓ amos to each — a <b>kula</b>;
-                      confirm with your rav before relying on it.
+                      them, would leave ≤ 141⅓ amos to each. The din itself
+                      is normative halacha; it is off by default only
+                      because the app measures between squared bounds
+                      (slightly lenient) — verify tight gaps with the 📏
+                      ruler, and take only borderline cases to a rav.
                     </label>
                     {villagesOn && view && view.villagesJoined > 0 && (
                       <p className="success">

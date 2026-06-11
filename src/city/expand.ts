@@ -45,6 +45,10 @@ export interface ExpandResult {
   /** Datasets that contributed buildings and then failed mid-run — the
    * detected city may have invisible coverage holes; Retry resumes. */
   lostDatasets?: string[];
+  /** Structures excluded as clearly not batei dirah — sheds, garages,
+   * barns, silos, water towers (SA 398:6) — and so not counted in the
+   * city chain. */
+  excludedCount?: number;
 }
 
 const INITIAL_HALF_M = 1200;
@@ -181,12 +185,22 @@ export async function detectCityExpanding(
     }
   };
 
+  /** Structures excluded as clearly not batei dirah (SA 398:6): they
+   * never join the chain, but their footprints are registered so the
+   * other dataset's copy of the same shed can't re-add it. */
+  const excludedIds = new Set<number | string>();
+
   /** @returns how many buildings were newly accepted. */
   const ingest = (list: FetchedBuilding[], dedupe: boolean): number => {
     let accepted = 0;
     for (const b of list) {
-      if (byId.has(b.id)) continue;
+      if (byId.has(b.id) || excludedIds.has(b.id)) continue;
       const box = ringBox(b.ring);
+      if (b.nonDirah) {
+        excludedIds.add(b.id);
+        register(box);
+        continue;
+      }
       if (dedupe && duplicates(box)) continue;
       byId.set(b.id, b.ring);
       register(box);
@@ -266,6 +280,7 @@ export async function detectCityExpanding(
     effectiveSource:
       source === "buildings" && osmCount === 0 && agsCount > 0 ? "arcgis" : undefined,
     lostDatasets: lostDatasets.size > 0 ? [...lostDatasets] : undefined,
+    excludedCount: excludedIds.size > 0 ? excludedIds.size : undefined,
   });
 
   // The very first fetch failing means no data at all — let it throw,
