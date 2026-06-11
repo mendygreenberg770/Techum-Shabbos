@@ -499,7 +499,25 @@ export default function MapView(props: Props) {
     syncRects(gainedPool.current, map, gained, GAINED_STYLE);
     syncRects(lostPool.current, map, lost, LOST_STYLE);
 
-    // Measuring ruler: endpoints + connecting line.
+    // Fit the viewport on meaningful changes only (not on drags/edits).
+    if (fitKey !== lastFitKey.current && fitBounds) {
+      lastFitKey.current = fitKey;
+      map.fitBounds(
+        new google.maps.LatLngBounds(
+          { lat: fitBounds.south, lng: fitBounds.west },
+          { lat: fitBounds.north, lng: fitBounds.east }
+        ),
+        24
+      );
+    }
+  });
+
+  // Measuring ruler: its own effect, gated only on the map existing —
+  // it must work while the city is still analyzing (no techum drawn
+  // yet), which is exactly when gaps get checked.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
     if (!measureLineRef.current) {
       measureLineRef.current = new google.maps.Polyline({
         strokeColor: "#1c1c1c",
@@ -519,11 +537,12 @@ export default function MapView(props: Props) {
       const dot = new google.maps.Marker({
         icon: {
           path: google.maps.SymbolPath.CIRCLE,
-          scale: 7,
+          scale: 8,
           fillColor: idx === 0 ? "#1c1c1c" : "#1a5fb4",
           fillOpacity: 1,
           strokeColor: "#ffffff",
           strokeWeight: 2,
+          labelOrigin: new google.maps.Point(0, 0),
         },
         label: {
           text: String(idx + 1),
@@ -551,18 +570,6 @@ export default function MapView(props: Props) {
         m.setMap(null);
       }
     });
-
-    // Fit the viewport on meaningful changes only (not on drags/edits).
-    if (fitKey !== lastFitKey.current && fitBounds) {
-      lastFitKey.current = fitKey;
-      map.fitBounds(
-        new google.maps.LatLngBounds(
-          { lat: fitBounds.south, lng: fitBounds.west },
-          { lat: fitBounds.north, lng: fitBounds.east }
-        ),
-        24
-      );
-    }
   });
 
   return <div ref={divRef} className="map" />;
