@@ -159,17 +159,28 @@ describe("detectCity: bow-shaped city (Nesivos Shabbos 42:17)", () => {
     expect(det.clusterSize).toBe(buildings.length); // all joined (30 m gaps)
     expect(det.bowGapM).not.toBeNull();
     expect(det.bowGapM!).toBeGreaterThan(1920);
-    // The conservative adjusted square exists, contains the user, and
-    // excludes the far arm: the user (on the bottom arm at y=0) gets a
-    // section that stays below the open mouth (~2,400 m wide).
-    expect(det.sectionBounds).not.toBeNull();
-    const s = det.sectionBounds!;
+    // The city is squared in sections: the user's section (bottom arm)
+    // first — it stays below the open mouth (~2,400 m wide) — and the
+    // remaining sections cover the rest of the cluster.
+    expect(det.sections.length).toBeGreaterThanOrEqual(2);
+    const s = det.sections[0];
     expect(s.south).toBeLessThanOrEqual(C.lat);
     expect(s.north).toBeGreaterThanOrEqual(C.lat);
     const heightM = (s.north - s.south) * perDegLat;
     expect(heightM).toBeLessThan(1000); // bottom arm only, not the mouth
     const widthM = (s.east - s.west) * perDegLng;
     expect(widthM).toBeGreaterThan(2000); // full arm length kept
+    // Every section avoids the over-limit fill: none spans the mouth.
+    for (const sec of det.sections) {
+      const hM = (sec.north - sec.south) * perDegLat;
+      const wM = (sec.east - sec.west) * perDegLng;
+      expect(Math.min(hM, wM)).toBeLessThan(2400);
+    }
+    // The far arm is covered by some section.
+    const farArmCovered = det.sections.some(
+      (sec) => (sec.north - C.lat) * perDegLat > 2300
+    );
+    expect(farArmCovered).toBe(true);
     // The gap locations are reported, inside the cluster's open middle
     // (grid-quantized: bands may stick out up to one 200 m cell).
     expect(det.bowGapRects.length).toBeGreaterThan(0);
@@ -195,7 +206,7 @@ describe("detectCity: bow-shaped city (Nesivos Shabbos 42:17)", () => {
     const det = detectCity(C, [rect(0, 0), rect(40, 0), rect(80, 0)], area(2000))!;
     expect(det.bowGapM).toBeNull();
     expect(det.bowGapRects).toEqual([]);
-    expect(det.sectionBounds).toBeNull();
+    expect(det.sections).toEqual([]);
   });
 });
 

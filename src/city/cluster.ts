@@ -72,13 +72,14 @@ export interface CityDetection {
    * for highlighting on the map (largest first, capped). */
   bowGapRects: Bounds[];
   /**
-   * When the bow rule disqualifies the full square: a conservative
-   * alternative square covering only the area around the user where
-   * every open stretch is within 4,000 amos of built ends — i.e., may
-   * legitimately be "squared in" (Nesivos Shabbos 42:17). Offered as a
-   * one-click stringent boundary; null when the full square is fine.
+   * When the bow rule disqualifies the full square, the city squared in
+   * SECTIONS (Nesivos Shabbos 42:17): rectangles of legitimately
+   * fillable area (no interior open stretch over 4,000 amos) covering
+   * the whole cluster — the user's section first. All sections are one
+   * city; each is squared on its own and generates its own 2,000-amah
+   * reach. Empty when the full square is fine.
    */
-  sectionBounds: Bounds | null;
+  sections: Bounds[];
   /** Member building footprints of the user's cluster (references to
    * the input rings) — the accurate city shape is drawn from these. */
   clusterRings: LatLng[][];
@@ -475,11 +476,11 @@ export function detectCity(
     (userB.minX + userB.maxX) / 2,
     (userB.minY + userB.maxY) / 2
   );
-  // The section square never exceeds the actual cluster extent (cells
-  // are 200 m quanta).
-  const sectionBounds = bow?.sectionBounds
-    ? rectIntersect(bow.sectionBounds, bounds)
-    : null;
+  // Section squares never exceed the actual cluster extent (cells are
+  // 200 m quanta).
+  const sections = (bow?.sections ?? [])
+    .map((s) => rectIntersect(s, bounds))
+    .filter((s): s is Bounds => s !== null);
 
   return {
     bounds,
@@ -492,7 +493,7 @@ export function detectCity(
     otherCities,
     bowGapM: bow?.maxGapM ?? null,
     bowGapRects: bow?.rects ?? [],
-    sectionBounds,
+    sections,
     clusterRings,
     neighborRings,
   };
@@ -501,9 +502,9 @@ export function detectCity(
 interface BowGapInfo {
   maxGapM: number;
   rects: Bounds[];
-  /** A conservative squared boundary limited to the legitimately
-   * "fillable" area around the user (see CityDetection.sectionBounds). */
-  sectionBounds: Bounds | null;
+  /** The city squared in sections: rectangles of legitimately fillable
+   * area covering the whole cluster, the user's section first. */
+  sections: Bounds[];
 }
 
 /** Most rectangles to highlight — enough to outline the open region
@@ -606,11 +607,13 @@ function bowGaps(
   fillLines(false);
 
   const isFilled = (cy: number, cx: number) => filled.get(cy)?.has(cx) ?? false;
-  const ucx = Math.floor(userX / CELL);
-  const ucy = Math.floor(userY / CELL);
-  let sectionBounds: Bounds | null = null;
-  if (isFilled(ucy, ucx)) {
-    let x0 = ucx, x1 = ucx, y0 = ucy, y1 = ucy;
+
+  // Square the city in sections: greedy maximal rectangles of filled
+  // cells, the user's first, then more until every occupied (built)
+  // cell is covered. Each section contains no over-limit open stretch,
+  // so each may legitimately be squared on its own.
+  const growFrom = (scy: number, scx: number) => {
+    let x0 = scx, x1 = scx, y0 = scy, y1 = scy;
     let grew = true;
     while (grew) {
       grew = false;
@@ -627,12 +630,55 @@ function bowGaps(
       if (rowOk(y1 + 1)) { y1++; grew = true; }
       if (rowOk(y0 - 1)) { y0--; grew = true; }
     }
-    sectionBounds = toBounds(x0 * CELL, y0 * CELL, (x1 + 1) * CELL, (y1 + 1) * CELL);
+    return { x0, x1, y0, y1 };
+  };
+
+  const MAX_SECTIONS = 16;
+  const occCells: [number, number][] = [];
+  for (const [cy, set] of occupied) for (const cx of set) occCells.push([cy, cx]);
+  const covered = new Set<string>();
+  const sections: Bounds[] = [];
+  const addSection = (scy: number, scx: number) => {
+    const r = growFrom(scy, scx);
+    // Tighten to the built cells actually inside the rectangle, and
+    // mark them covered.
+    let bx0 = Infinity, bx1 = -Infinity, by0 = Infinity, by1 = -Infinity;
+    for (const [cy, cx] of occCells) {
+      if (cy < r.y0 || cy > r.y1 || cx < r.x0 || cx > r.x1) continue;
+      covered.add(`${cy}:${cx}`);
+      bx0 = Math.min(bx0, cx);
+      bx1 = Math.max(bx1, cx);
+      by0 = Math.min(by0, cy);
+      by1 = Math.max(by1, cy);
+    }
+    if (!isFinite(bx0)) return;
+    sections.push(toBounds(bx0 * CELL, by0 * CELL, (bx1 + 1) * CELL, (by1 + 1) * CELL));
+  };
+
+  const ucx = Math.floor(userX / CELL);
+  const ucy = Math.floor(userY / CELL);
+  addSection(ucy, ucx);
+  for (const [cy, cx] of occCells) {
+    if (covered.has(`${cy}:${cx}`)) continue;
+    if (sections.length >= MAX_SECTIONS) {
+      // Lump everything left into one final rectangle.
+      let bx0 = Infinity, bx1 = -Infinity, by0 = Infinity, by1 = -Infinity;
+      for (const [ry, rx] of occCells) {
+        if (covered.has(`${ry}:${rx}`)) continue;
+        bx0 = Math.min(bx0, rx);
+        bx1 = Math.max(bx1, rx);
+        by0 = Math.min(by0, ry);
+        by1 = Math.max(by1, ry);
+      }
+      sections.push(toBounds(bx0 * CELL, by0 * CELL, (bx1 + 1) * CELL, (by1 + 1) * CELL));
+      break;
+    }
+    addSection(cy, cx);
   }
 
   return {
     maxGapM,
     rects: gaps.slice(0, MAX_BOW_RECTS).map((g) => g.rect),
-    sectionBounds,
+    sections,
   };
 }

@@ -18,6 +18,9 @@ interface Props {
   altTechumBounds: Bounds | null;
   /** The squared city (green); editable when cityEditable is set. */
   cityBounds: Bounds | null;
+  /** Other sections of a bow-squared city — same city, each squared on
+   * its own (green, non-editable). */
+  extraCityRects: Bounds[];
   /** Accurate (concave) city shape: chained buildings dilated by half
    * the joining distance — one or more rings (orange). */
   cityOutline: LatLng[][] | null;
@@ -73,6 +76,15 @@ const SWALLOWED_STYLE: google.maps.RectangleOptions = {
   strokeWeight: 1.5,
   fillColor: "#99c1f1",
   fillOpacity: 0.3,
+  clickable: false,
+};
+
+const SECTION_CITY_STYLE: google.maps.RectangleOptions = {
+  strokeColor: "#26a269",
+  strokeOpacity: 0.9,
+  strokeWeight: 2,
+  fillColor: "#26a269",
+  fillOpacity: 0.05,
   clickable: false,
 };
 
@@ -188,6 +200,7 @@ export default function MapView(props: Props) {
   const swallowedPool = useRef<google.maps.Rectangle[]>([]);
   const partialPool = useRef<google.maps.Rectangle[]>([]);
   const bowGapPool = useRef<google.maps.Rectangle[]>([]);
+  const sectionCityPool = useRef<google.maps.Rectangle[]>([]);
   const hostPlaceablePool = useRef<google.maps.Rectangle[]>([]);
   const feasibleRingRef = useRef<google.maps.Polygon | null>(null);
   const feasibleCircleRef = useRef<google.maps.Circle | null>(null);
@@ -243,6 +256,7 @@ export default function MapView(props: Props) {
     bowGapRects,
     altTechumBounds,
     cityBounds,
+    extraCityRects,
     cityOutline,
     neighborOutline,
     cityEditable,
@@ -283,6 +297,7 @@ export default function MapView(props: Props) {
     syncRects(swallowedPool.current, map, swallowedCities, SWALLOWED_STYLE);
     syncRects(partialPool.current, map, partialCities, PARTIAL_CITY_STYLE);
     syncRects(bowGapPool.current, map, bowGapRects, BOW_GAP_STYLE);
+    syncRects(sectionCityPool.current, map, extraCityRects, SECTION_CITY_STYLE);
 
     // Alternate karpef-opinion techum (thin gray, no fill)
     if (!altRef.current) {

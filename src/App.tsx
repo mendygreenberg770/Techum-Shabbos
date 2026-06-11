@@ -385,14 +385,27 @@ export default function App() {
 
   const view = useMemo(() => {
     if (!place || cityLoading) return null;
+    // Bow-shaped city (Nesivos Shabbos 42:17): when the grand square
+    // spans open stretches over 4,000 amos, the city is squared in
+    // SECTIONS instead — the user's section drives the main techum, and
+    // every other section (same city!) is drawn squared on its own with
+    // its own 2,000-amah reach. The illegitimate fill is never drawn.
+    const bowSections =
+      usingCity &&
+      !manualCityBounds &&
+      detection?.bowGapM != null &&
+      (detection.sections.length ?? 0) > 1
+        ? detection.sections
+        : null;
+    const sectionedCity = bowSections ? bowSections[0] : null;
     // Three-villages din (SA 398:8, opt-in kula): a middle village that
     // "viewed as between" two outer ones leaves ≤141⅓ amos to each
     // joins all three into one city — squared together.
     const villages =
       villagesOn && usingCity && cityBounds && !manualCityBounds
-        ? applyThreeVillages(cityBounds, detection?.otherCities ?? [])
+        ? applyThreeVillages(sectionedCity ?? cityBounds, detection?.otherCities ?? [])
         : null;
-    const effCityBounds = villages ? villages.bounds : cityBounds;
+    const effCityBounds = villages ? villages.bounds : sectionedCity ?? cityBounds;
     const otherCities = villages ? villages.remaining : detection?.otherCities ?? [];
     const base =
       usingCity && effCityBounds
@@ -497,8 +510,17 @@ export default function App() {
           }
         : null;
 
+    // Other sections of a bow-squared city: each is squared on its own
+    // (green) and generates its own techum (blue) — same city, so no
+    // muvla/kalsa treatment between sections.
+    const sectionRects = bowSections ? bowSections.slice(1) : [];
+    const sectionTechums = sectionRects.map((s) =>
+      expandBounds(karpefOn ? expandBounds(s, KARPEF_M) : s, TECHUM_M)
+    );
+
     let fit = techum;
     for (const b of bumps) fit = rectUnion(fit, b.bounds);
+    for (const t of sectionTechums) fit = rectUnion(fit, t);
     if (plan && destination && !plan.destinationInHomeTechum) {
       fit = rectUnion(fit, techumFromPoint(destination.location));
       if (rotated) {
@@ -523,6 +545,8 @@ export default function App() {
       fit,
       effCityBounds,
       villagesJoined: villages?.absorbed.length ?? 0,
+      sectionRects,
+      sectionTechums,
     };
   }, [place, cityLoading, usingCity, cityBounds, manualCityBounds, karpefOn, villagesOn, detection, eruvOn, destination, eruvSpot, eruvCityState, eruvCityResolved, rotationOn, rotationOffset]);
 
@@ -873,25 +897,31 @@ export default function App() {
                     ⚠ <b>Bow-shaped city</b> (Mishnah Eruvin 55a; Nesivos
                     Shabbos 42:17): squaring may "fill in" open land between
                     built areas only when the built ends flanking it are
-                    within 4,000 amos = 1,920 m of each other. This squared
-                    boundary spans open stretches up to ≈
-                    {Math.round(detection.bowGapM).toLocaleString()} m wide —{" "}
-                    <b>highlighted magenta on the map</b> — which squaring
-                    cannot bridge. The built section on the far side of such
-                    a stretch may not really be part of your techum; each
-                    section may need to be squared on its own. Review with a
-                    rav.
-                    {detection.sectionBounds && !manualCityBounds && (
-                      <div className="saved-actions" style={{ marginTop: 8 }}>
-                        <button
-                          className="mini-button"
-                          onClick={() =>
-                            setManualCityBounds(detection.sectionBounds)
-                          }
-                        >
-                          ▢ Use my section's square only (stringency)
-                        </button>
-                      </div>
+                    within 4,000 amos = 1,920 m of each other. Here the
+                    grand square would span open stretches up to ≈
+                    {Math.round(detection.bowGapM).toLocaleString()} m wide
+                    (<b>magenta on the map</b>), so the city was{" "}
+                    <b>squared in sections</b>
+                    {(view?.sectionRects.length ?? 0) > 0 ? (
+                      <>
+                        : your section carries the main techum, and{" "}
+                        {view!.sectionRects.length} other section
+                        {view!.sectionRects.length === 1 ? "" : "s"} of the
+                        same city {view!.sectionRects.length === 1 ? "is" : "are"}{" "}
+                        squared separately (green) with{" "}
+                        {view!.sectionRects.length === 1 ? "its" : "their"} own
+                        2,000-amah reach (blue). The open stretches between
+                        sections are <b>not</b> filled in. The eiruv planner
+                        and muvla credits measure from your own section only
+                        (a stringency). Review with a rav.
+                      </>
+                    ) : (
+                      <>
+                        {" "}— but the sections could not be separated here
+                        (the open stretch winds around connected areas);
+                        review with a rav and consider adjusting the
+                        boundary manually.
+                      </>
                     )}
                   </div>
                 )}
@@ -1377,7 +1407,11 @@ export default function App() {
             place={place}
             techumBounds={view?.techum ?? null}
             altTechumBounds={showDetails ? view?.altTechum ?? null : null}
-            techumBumps={view?.bumps.map((b) => b.bounds) ?? []}
+            techumBumps={[
+              ...(view?.bumps.map((b) => b.bounds) ?? []),
+              ...(view?.sectionTechums ?? []),
+            ]}
+            extraCityRects={view?.sectionRects ?? []}
             swallowedCities={view?.bumps.map((b) => b.city) ?? []}
             cityBounds={usingCity ? effCity : null}
             cityOutline={usingCity && !manualCityBounds ? cityOutline : null}
