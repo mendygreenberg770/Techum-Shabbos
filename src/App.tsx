@@ -922,17 +922,17 @@ export default function App() {
                     ⚠ <b>Bow-shaped city</b> (Mishnah Eruvin 55a; Nesivos
                     Shabbos 42:17): squaring may "fill in" open land between
                     built areas only when the built ends flanking it are
-                    within 4,000 amos = 1,920 m of each other. Here the
-                    grand square would span open stretches up to ≈
-                    {Math.round(detection.bowGapM).toLocaleString()} m wide
-                    (<b>magenta on the map</b>), so the city was{" "}
-                    <b>squared in sections</b>
+                    within 4,000 amos = 1,920 m of each other.
                     {(view?.sectionRects.length ?? 0) > 0 ? (
                       <>
-                        : your section carries the main techum, and{" "}
-                        {view!.sectionRects.length} other section
-                        {view!.sectionRects.length === 1 ? "" : "s"} of the
-                        same city {view!.sectionRects.length === 1 ? "is" : "are"}{" "}
+                        {" "}Here the grand square would span open stretches
+                        up to ≈{Math.round(detection.bowGapM).toLocaleString()}{" "}
+                        m wide (<b>magenta on the map</b>), so the city was{" "}
+                        <b>squared in sections</b>: your section carries the
+                        main techum, and {view!.sectionRects.length} other
+                        section{view!.sectionRects.length === 1 ? "" : "s"} of
+                        the same city{" "}
+                        {view!.sectionRects.length === 1 ? "is" : "are"}{" "}
                         squared separately (green) with{" "}
                         {view!.sectionRects.length === 1 ? "its" : "their"} own
                         2,000-amah reach (blue). The open stretches between
@@ -940,12 +940,27 @@ export default function App() {
                         muvla extensions, and kalsa checks account for{" "}
                         <b>every</b> section's reach. Review with a rav.
                       </>
+                    ) : manualCityBounds ? (
+                      <>
+                        {" "}Open stretches up to ≈
+                        {Math.round(detection.bowGapM).toLocaleString()} m are
+                        highlighted magenta. Your <b>manual boundary</b> is in
+                        force, so automatic sectioning is skipped — make sure
+                        the rectangle you drew doesn't bridge an over-wide
+                        stretch; review with a rav.
+                      </>
                     ) : (
                       <>
-                        {" "}— but the sections could not be separated here
-                        (the open stretch winds around connected areas);
-                        review with a rav and consider adjusting the
-                        boundary manually.
+                        {" "}Open stretches up to ≈
+                        {Math.round(detection.bowGapM).toLocaleString()} m
+                        exist <b>along one axis</b> (magenta) — but each is
+                        flanked by built areas within 4,000 amos along the{" "}
+                        <i>other</i> axis, so the fill can stand on that
+                        basis and the single square was kept. Whether
+                        cross-axis flanking suffices to "square in" such a
+                        pocket is a judgment call — review with a rav, and
+                        adjust the boundary manually to exclude the pocket
+                        if ruled stringently.
                       </>
                     )}
                   </div>
@@ -1439,7 +1454,7 @@ export default function App() {
             extraCityRects={view?.sectionRects ?? []}
             swallowedCities={view?.allBumps.map((b) => b.city) ?? []}
             cityBounds={usingCity ? effCity : null}
-            cityOutline={usingCity && !manualCityBounds ? cityOutline : null}
+            cityOutline={usingCity ? cityOutline : null}
             neighborOutline={neighborOutline}
             cityEditable={adjusting}
             onCityBoundsChange={(b) => setManualCityBounds(b)}
