@@ -42,20 +42,12 @@ interface GeoJsonFeature {
   properties?: { OCC_CLS?: string } | null;
 }
 
-/** Collect every [lng, lat] position in a (Multi)Polygon coordinates array. */
-function collectPositions(coords: unknown, out: LatLng[]): void {
-  if (!Array.isArray(coords)) return;
-  if (coords.length >= 2 && typeof coords[0] === "number" && typeof coords[1] === "number") {
-    out.push({ lat: coords[1] as number, lng: coords[0] as number });
-    return;
-  }
-  for (const c of coords) collectPositions(c, out);
-}
-
-/** A large structure keeps its true outline: a big curved/diagonal
- * tower's bounding box can overstate it by tens of meters and falsely
- * bridge gaps. Small houses keep cheap bounding boxes. */
-const EXACT_GEOM_SPAN_M = 35;
+/** Multi-part features keep a combined bounding box only while small;
+ * above this span the largest part's true outline is used instead (a
+ * big bbox can falsely bridge gaps). Single-ring features always keep
+ * their true outline — even for a small house, a few meters decide a
+ * 70⅔-amah join. */
+const MULTIPART_BBOX_SPAN_M = 35;
 
 /** Collect every ring (array of positions) in a (Multi)Polygon. */
 function collectRings(coords: unknown, out: LatLng[][]): void {
@@ -76,28 +68,42 @@ function collectRings(coords: unknown, out: LatLng[][]): void {
   for (const c of coords) collectRings(c, out);
 }
 
-/** The structure's ring: its bounding rectangle when small (the same
- * shape the Overpass `out bb` source produces), or its true (largest,
- * decimated) outline when large enough for the bbox error to matter. */
+/** Drop a duplicated closing point and decimate; null when degenerate. */
+function cleanRing(ring: LatLng[]): LatLng[] | null {
+  const pts = [...ring];
+  const last = pts[pts.length - 1];
+  if (pts.length > 1 && last.lat === pts[0].lat && last.lng === pts[0].lng) {
+    pts.pop();
+  }
+  return pts.length >= 3 ? decimateRing(pts) : null;
+}
+
+/** The structure's ring: its TRUE outline (gaps are measured
+ * wall-to-wall — even for a small house a few meters decide a join).
+ * Multi-part features: a small combined bounding box, or the largest
+ * part's outline when the bbox would be big enough to bridge gaps. */
 function featureRing(feature: GeoJsonFeature): LatLng[] | null {
-  const pts: LatLng[] = [];
-  collectPositions(feature.geometry?.coordinates, pts);
-  if (pts.length < 3) return null;
+  const rings: LatLng[][] = [];
+  collectRings(feature.geometry?.coordinates, rings);
+  if (rings.length === 0) return null;
+  if (rings.length === 1) return cleanRing(rings[0]);
+
+  // Multi-part feature.
   let minLat = Infinity, minLng = Infinity, maxLat = -Infinity, maxLng = -Infinity;
-  for (const p of pts) {
-    minLat = Math.min(minLat, p.lat);
-    minLng = Math.min(minLng, p.lng);
-    maxLat = Math.max(maxLat, p.lat);
-    maxLng = Math.max(maxLng, p.lng);
+  for (const ring of rings) {
+    for (const p of ring) {
+      minLat = Math.min(minLat, p.lat);
+      minLng = Math.min(minLng, p.lng);
+      maxLat = Math.max(maxLat, p.lat);
+      maxLng = Math.max(maxLng, p.lng);
+    }
   }
   const { perDegLat, perDegLng } = metersPerDegree((minLat + maxLat) / 2);
   const spanM = Math.max(
     (maxLat - minLat) * perDegLat,
     (maxLng - minLng) * perDegLng
   );
-  if (spanM > EXACT_GEOM_SPAN_M) {
-    const rings: LatLng[][] = [];
-    collectRings(feature.geometry?.coordinates, rings);
+  if (spanM > MULTIPART_BBOX_SPAN_M) {
     let best: LatLng[] | null = null;
     let bestArea = -1;
     for (const ring of rings) {
@@ -114,12 +120,7 @@ function featureRing(feature: GeoJsonFeature): LatLng[] | null {
         best = ring;
       }
     }
-    if (best && best.length >= 3) {
-      const pts2 = [...best];
-      const last = pts2[pts2.length - 1];
-      if (last.lat === pts2[0].lat && last.lng === pts2[0].lng) pts2.pop();
-      if (pts2.length >= 3) return decimateRing(pts2);
-    }
+    return best ? cleanRing(best) : null;
   }
   return [
     { lat: minLat, lng: minLng },

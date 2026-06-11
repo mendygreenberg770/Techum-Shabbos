@@ -66,8 +66,9 @@ Known limitations / open halachic items (see DESIGN.md §6 and §9):
 clearly non-dwelling structures (sheds, garages, barns, silos…) are
 excluded per SA 398:6, but ambiguous ones (offices, stores, shuls without
 a resident caretaker) are still counted — the main open shaala; gaps are
-measured wall-to-wall using true outlines for large structures (small
-houses use bounding boxes, an error of at most a few meters); the
+measured wall-to-wall from every structure's true outline (outlines are
+simplified to ≤32 vertices, which can only enlarge measured gaps — a
+stringency); the
 *feasible-region* shading treats the eiruv as a bare point — but towns
 that could carry the eiruv (host-town din, SA HaRav 408) are highlighted
 as placement areas even when no bare-point placement reaches; muvla

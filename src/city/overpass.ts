@@ -107,12 +107,6 @@ export function decimateRing(ring: LatLng[], max = 32): LatLng[] {
   return out;
 }
 
-/** Buildings with a perimeter above this get their true outline fetched:
- * a large curved/diagonal structure's bounding box can overstate it by
- * tens of meters and falsely bridge gaps (towers "joining" across
- * water). Small houses keep cheap bounding boxes — for them the error
- * is at most a few meters. */
-const EXACT_GEOM_PERIMETER_M = 100;
 
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -273,60 +267,42 @@ export async function fetchBuildingsInRects(
   signal?: AbortSignal
 ): Promise<FetchedBuilding[]> {
   if (rects.length === 0) return [];
+  // TRUE outlines for every building (out geom): at the 70⅔-amah
+  // threshold a few meters decide a join, and even a small rotated
+  // house's bounding box understates gaps by that much. Costs ~2.5×
+  // the payload of bounding boxes — accuracy over bytes.
   const union = rects.map((r) => `way[building](${bboxOf(r)});`).join("");
-  const query = `[out:json][timeout:60];(${union});out ids bb qt;`;
+  const query = `[out:json][timeout:90];(${union});out geom qt;`;
   // The non-dirah structures are identified by a second, much smaller
   // ids-only query (fetching every building's tags would multiply the
-  // payload). Its failure is benign: the structures are then merely
-  // counted as before (a kula left in place, not a data hole).
+  // payload further). Its failure is benign: the structures are then
+  // merely counted as before (a kula left in place, not a data hole).
   const xUnion = rects
     .map((r) => `way[building~"${NON_DIRAH_REGEX}"](${bboxOf(r)});`)
     .join("");
   const xQuery = `[out:json][timeout:60];(${xUnion});out ids qt;`;
-  // Large structures get their TRUE outline (a third, small query):
-  // measuring from a big tower's bounding box instead of its walls can
-  // falsely join across water. Failure is benign (bbox kept).
-  const gUnion = rects
-    .map(
-      (r) =>
-        `way[building](if: length() > ${EXACT_GEOM_PERIMETER_M})(${bboxOf(r)});`
-    )
-    .join("");
-  const gQuery = `[out:json][timeout:60];(${gUnion});out geom qt;`;
-  const [incRes, excRes, geomRes] = await Promise.allSettled([
+  const [incRes, excRes] = await Promise.allSettled([
     runQuery(query, signal),
     runQuery(xQuery, signal),
-    runQuery(gQuery, signal),
   ]);
   if (incRes.status === "rejected") throw incRes.reason;
   const nonDirahIds = new Set<number>(
     excRes.status === "fulfilled" ? excRes.value.map((el) => el.id) : []
   );
-  const exactRings = new Map<number, LatLng[]>();
-  if (geomRes.status === "fulfilled") {
-    for (const el of geomRes.value) {
-      if (el.type !== "way" || (el.geometry?.length ?? 0) < 3) continue;
-      const pts = el.geometry!.map((g) => ({ lat: g.lat, lng: g.lon }));
-      const last = pts[pts.length - 1];
-      if (last.lat === pts[0].lat && last.lng === pts[0].lng) pts.pop();
-      exactRings.set(el.id, decimateRing(pts));
-    }
-  }
-  return incRes.value
-    .filter((el) => el.type === "way" && el.bounds)
-    .map((el) => {
-      const b = el.bounds!;
-      return {
-        id: el.id,
-        nonDirah: nonDirahIds.has(el.id) || undefined,
-        ring: exactRings.get(el.id) ?? [
-          { lat: b.minlat, lng: b.minlon },
-          { lat: b.minlat, lng: b.maxlon },
-          { lat: b.maxlat, lng: b.maxlon },
-          { lat: b.maxlat, lng: b.minlon },
-        ],
-      };
+  const out: FetchedBuilding[] = [];
+  for (const el of incRes.value) {
+    if (el.type !== "way" || (el.geometry?.length ?? 0) < 3) continue;
+    const pts = el.geometry!.map((g) => ({ lat: g.lat, lng: g.lon }));
+    const last = pts[pts.length - 1];
+    if (last.lat === pts[0].lat && last.lng === pts[0].lng) pts.pop();
+    if (pts.length < 3) continue;
+    out.push({
+      id: el.id,
+      nonDirah: nonDirahIds.has(el.id) || undefined,
+      ring: decimateRing(pts),
     });
+  }
+  return out;
 }
 
 export function fetchBuildingsInRect(

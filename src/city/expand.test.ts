@@ -15,16 +15,18 @@ const okJson = (body: unknown) =>
     headers: { "Content-Type": "application/json" },
   });
 
-/** An OSM way element: a ~10 m building centered at an offset (deg). */
+/** An OSM way element: a ~10 m building at an offset (deg), with its
+ * true outline (the fetcher now uses `out geom`). */
 const osmWay = (id: number, dLat: number, dLng: number) => ({
   type: "way",
   id,
-  bounds: {
-    minlat: C.lat + dLat,
-    minlon: C.lng + dLng,
-    maxlat: C.lat + dLat + 0.0001,
-    maxlon: C.lng + dLng + 0.0001,
-  },
+  geometry: [
+    { lat: C.lat + dLat, lon: C.lng + dLng },
+    { lat: C.lat + dLat, lon: C.lng + dLng + 0.0001 },
+    { lat: C.lat + dLat + 0.0001, lon: C.lng + dLng + 0.0001 },
+    { lat: C.lat + dLat + 0.0001, lon: C.lng + dLng },
+    { lat: C.lat + dLat, lon: C.lng + dLng },
+  ],
 });
 
 /** An ArcGIS GeoJSON feature at an offset (deg). */
