@@ -99,6 +99,27 @@ interface EruvCityState {
  * (matches MIN_CITY_SIZE in the cluster engine — a working assumption). */
 const MIN_TOWN_BUILDINGS = 2;
 
+interface MapLayers {
+  /** The techum with all its extensions — where you may walk. */
+  walk: boolean;
+  /** Detected city shape (orange outline). */
+  city: boolean;
+  /** Squared city / ribua (green rectangles). */
+  square: boolean;
+  /** Neighboring towns: muvla fills, kalsa reds, non-joining areas. */
+  neighbors: boolean;
+  /** Bow stretches (magenta) and the karpef comparison line (gray). */
+  warnings: boolean;
+}
+const LAYERS_KEY = "techum.layers";
+const DEFAULT_LAYERS: MapLayers = {
+  walk: true,
+  city: false,
+  square: false,
+  neighbors: false,
+  warnings: false,
+};
+
 const fmtAmos = (m: number) => Math.round(m / AMAH_M).toLocaleString();
 
 /** When this deployment was built, in US Eastern time (EDT/EST). */
@@ -140,9 +161,27 @@ export default function App() {
   const [progress, setProgress] = useState<ExpandProgress | null>(null);
   const [retryNonce, setRetryNonce] = useState(0);
   const [showRadiusCircle, setShowRadiusCircle] = useState(false);
-  /** Default view: plain city outline + square + techum. Details add
-   * non-joining neighbors, comparison lines, and gap highlights. */
-  const [showDetails, setShowDetails] = useState(false);
+  /** Map layers: the default view shows only where you may walk; the
+   * supporting geometry is toggled on per layer. Persisted locally. */
+  const [layers, setLayers] = useState<MapLayers>(() => {
+    try {
+      const raw = localStorage.getItem(LAYERS_KEY);
+      if (raw) return { ...DEFAULT_LAYERS, ...JSON.parse(raw) };
+    } catch {
+      // Corrupt/unavailable storage — fall through to defaults.
+    }
+    return { ...DEFAULT_LAYERS };
+  });
+  const setLayer = (key: keyof MapLayers, on: boolean) =>
+    setLayers((prev) => {
+      const next = { ...prev, [key]: on };
+      try {
+        localStorage.setItem(LAYERS_KEY, JSON.stringify(next));
+      } catch {
+        // Best effort only.
+      }
+      return next;
+    });
   /** Measuring ruler: two map clicks → distance in amos. */
   const [measureOn, setMeasureOn] = useState(false);
   const [measurePts, setMeasurePts] = useState<LatLng[]>([]);
@@ -364,10 +403,10 @@ export default function App() {
   );
   const neighborOutline = useMemo(
     () =>
-      showDetails && detection && detection.neighborRings.length > 0
+      layers.neighbors && detection && detection.neighborRings.length > 0
         ? unionOutline(detection.neighborRings, KARPEF_M / 2)
         : null,
-    [detection, showDetails]
+    [detection, layers.neighbors]
   );
 
   const cityBounds = manualCityBounds ?? detection?.bounds ?? null;
@@ -1046,18 +1085,54 @@ export default function App() {
                         between them).
                       </p>
                     )}
-                    <label className="toggle">
-                      <input
-                        type="checkbox"
-                        checked={showDetails}
-                        onChange={(e) => setShowDetails(e.target.checked)}
-                      />
-                      Show calculation details on the map: nearby built-up
-                      areas that do <b>not</b> join the city (brown), open
-                      stretches too wide to square over (magenta), and the
-                      karpef comparison line (gray). Default view shows just
-                      the city outline, its square, and the techum.
-                    </label>
+                    <div className="field">
+                      <span className="field-label">
+                        Map layers (default: just where you may walk)
+                      </span>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={layers.walk}
+                          onChange={(e) => setLayer("walk", e.target.checked)}
+                        />
+                        Where you may walk — the techum with all its
+                        extensions (blue)
+                      </label>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={layers.square}
+                          onChange={(e) => setLayer("square", e.target.checked)}
+                        />
+                        Squared city / ribua (green)
+                      </label>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={layers.city}
+                          onChange={(e) => setLayer("city", e.target.checked)}
+                        />
+                        Detected city shape (orange outline)
+                      </label>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={layers.neighbors}
+                          onChange={(e) => setLayer("neighbors", e.target.checked)}
+                        />
+                        Neighboring towns — swallowed (light blue), line ends
+                        mid-town (red), not joining (brown)
+                      </label>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          checked={layers.warnings}
+                          onChange={(e) => setLayer("warnings", e.target.checked)}
+                        />
+                        Warnings &amp; comparisons — over-wide open stretches
+                        (magenta), karpef comparison line (gray)
+                      </label>
+                    </div>
                     <label className="toggle">
                       <input
                         type="checkbox"
@@ -1474,23 +1549,31 @@ export default function App() {
         {mapsReady && (
           <MapView
             place={place}
-            techumBounds={view?.techum ?? null}
-            altTechumBounds={showDetails ? view?.altTechum ?? null : null}
-            techumBumps={[
-              ...(view?.allBumps.map((b) => b.bounds) ?? []),
-              ...(view?.sectionTechums ?? []),
-            ]}
-            extraCityRects={view?.sectionRects ?? []}
-            swallowedCities={view?.allBumps.map((b) => b.city) ?? []}
-            cityBounds={usingCity ? effCity : null}
-            cityOutline={usingCity ? cityOutline : null}
+            techumBounds={layers.walk ? view?.techum ?? null : null}
+            altTechumBounds={layers.warnings ? view?.altTechum ?? null : null}
+            techumBumps={
+              layers.walk
+                ? [
+                    ...(view?.allBumps.map((b) => b.bounds) ?? []),
+                    ...(view?.sectionTechums ?? []),
+                  ]
+                : []
+            }
+            extraCityRects={
+              layers.square || adjusting ? view?.sectionRects ?? [] : []
+            }
+            swallowedCities={
+              layers.neighbors ? view?.allBumps.map((b) => b.city) ?? [] : []
+            }
+            cityBounds={usingCity && (layers.square || adjusting) ? effCity : null}
+            cityOutline={usingCity && layers.city ? cityOutline : null}
             neighborOutline={neighborOutline}
             cityEditable={adjusting}
             onCityBoundsChange={(b) => setManualCityBounds(b)}
             showRadiusCircle={mode === "point" && showRadiusCircle}
-            partialCities={partialCities}
+            partialCities={layers.neighbors ? partialCities : []}
             bowGapRects={
-              showDetails && usingCity && !manualCityBounds
+              layers.warnings && usingCity && !manualCityBounds
                 ? detection?.bowGapRects ?? []
                 : []
             }

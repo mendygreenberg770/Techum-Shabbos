@@ -280,7 +280,9 @@ export default function MapView(props: Props) {
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !place || !techumBounds) return;
+    // Layers may hide the techum while others stay on — only the map
+    // and a selected place are required here.
+    if (!map || !place) return;
 
     // Home marker
     if (!markerRef.current) {
@@ -291,9 +293,14 @@ export default function MapView(props: Props) {
 
     // Techum (blue) + muvla extensions
     if (!techumRef.current) {
-      techumRef.current = new google.maps.Rectangle({ map, ...TECHUM_STYLE });
+      techumRef.current = new google.maps.Rectangle(TECHUM_STYLE);
     }
-    techumRef.current.setBounds(toGBounds(techumBounds));
+    if (techumBounds) {
+      techumRef.current.setBounds(toGBounds(techumBounds));
+      techumRef.current.setMap(map);
+    } else {
+      techumRef.current.setMap(null);
+    }
     syncRects(bumpPool.current, map, techumBumps, TECHUM_STYLE);
     syncRects(swallowedPool.current, map, swallowedCities, SWALLOWED_STYLE);
     syncRects(partialPool.current, map, partialCities, PARTIAL_CITY_STYLE);
