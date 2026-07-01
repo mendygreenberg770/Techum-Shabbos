@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearOverpassCache,
+  decimateRing,
   fetchBuildingsInRect,
   fetchBuildingsInRects,
   fetchSettledAreasInRect,
@@ -34,6 +35,27 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
   clearOverpassCache();
+});
+
+describe("decimateRing", () => {
+  it("keeps the extreme vertices — the ribua edges of the building", () => {
+    // A 100-vertex rounded outline whose extremes fall between the even
+    // sample positions (phase offset): the decimated ring must still
+    // reach the exact same bounding extremes.
+    const ring = Array.from({ length: 100 }, (_, i) => {
+      const a = (2 * Math.PI * i) / 100 + 0.037;
+      return { lat: 40.7 + 0.001 * Math.sin(a), lng: -73.95 + 0.001 * Math.cos(a) };
+    });
+    const d = decimateRing(ring);
+    expect(d.length).toBeLessThanOrEqual(32);
+    const ext = (r: { lat: number; lng: number }[]) => ({
+      n: Math.max(...r.map((p) => p.lat)),
+      s: Math.min(...r.map((p) => p.lat)),
+      e: Math.max(...r.map((p) => p.lng)),
+      w: Math.min(...r.map((p) => p.lng)),
+    });
+    expect(ext(d)).toEqual(ext(ring));
+  });
 });
 
 describe("fetchBuildingsInRect", () => {

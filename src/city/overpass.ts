@@ -101,10 +101,21 @@ const NON_DIRAH_REGEX = `^(${NON_DIRAH_VALUES.join("|")})$`;
  * cut corners inward — measured gaps grow slightly, a stringency. */
 export function decimateRing(ring: LatLng[], max = 32): LatLng[] {
   if (ring.length <= max) return ring;
-  const step = ring.length / max;
-  const out: LatLng[] = [];
-  for (let i = 0; i < max; i++) out.push(ring[Math.floor(i * step)]);
-  return out;
+  // The four extreme vertices are always kept: they define the squared
+  // bounds (ribua) and the outermost walls — dropping one would move
+  // the techum line inward off the actual building.
+  let iN = 0, iS = 0, iE = 0, iW = 0;
+  ring.forEach((p, i) => {
+    if (p.lat > ring[iN].lat) iN = i;
+    if (p.lat < ring[iS].lat) iS = i;
+    if (p.lng > ring[iE].lng) iE = i;
+    if (p.lng < ring[iW].lng) iW = i;
+  });
+  const idxs = new Set<number>([iN, iS, iE, iW]);
+  const samples = max - idxs.size;
+  const step = ring.length / samples;
+  for (let k = 0; k < samples; k++) idxs.add(Math.floor(k * step));
+  return [...idxs].sort((a, b) => a - b).map((i) => ring[i]);
 }
 
 
